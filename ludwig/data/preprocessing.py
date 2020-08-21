@@ -59,7 +59,8 @@ def build_dataset(
 ):
     dataset_df = read_csv(dataset_csv)
     dataset_df.csv = dataset_csv
-    return build_dataset_df(
+
+    data, _, train_set_metadata = build_dataset_df(
         dataset_df,
         features,
         global_preprocessing_parameters,
@@ -67,6 +68,8 @@ def build_dataset(
         random_seed,
         **kwargs
     )
+
+    return data, train_set_metadata
 
 
 def build_dataset_df(
@@ -89,7 +92,7 @@ def build_dataset_df(
             global_preprocessing_parameters
         )
 
-    data_val = build_data(
+    data_val, dataset_df = build_data(
         dataset_df,
         features,
         train_set_metadata,
@@ -106,7 +109,7 @@ def build_dataset_df(
         random_seed=random_seed
     )
 
-    return data_val, train_set_metadata
+    return data_val, dataset_df, train_set_metadata
 
 
 def build_metadata(dataset_df, features, global_preprocessing_parameters):
@@ -135,7 +138,6 @@ def build_metadata(dataset_df, features, global_preprocessing_parameters):
             preprocessing_parameters
         )
     return train_set_metadata
-
 
 def build_data(
         dataset_df,
@@ -173,9 +175,22 @@ def build_data(
             dataset_df,
             data_dict,
             train_set_metadata,
-            preprocessing_parameters
+            preprocessing_parameters,
+            global_preprocessing_parameters
         )
-    return data_dict
+
+    offset = global_preprocessing_parameters.get('offset', 0)
+    limit = global_preprocessing_parameters.get('limit', len(dataset_df))
+
+    logger.info('Dataset offset: %s; limit: %s' % (offset, limit))
+
+    # slice the subset of rows from the dict keys
+    for (k, v) in data_dict.items():
+        data_dict[k] = data_utils.sampling(v, offset, limit)
+
+    dataset_df = dataset_df.iloc[offset:limit + offset]
+
+    return data_dict, dataset_df
 
 
 def handle_missing_values(dataset_df, feature, preprocessing_parameters):
@@ -654,7 +669,8 @@ def _preprocess_csv_for_training(
             data_test_csv
         )
         concatenated_df.csv = data_train_csv
-        data, train_set_metadata = build_dataset_df(
+
+        data, _, train_set_metadata = build_dataset_df(
             concatenated_df,
             features,
             preprocessing_params,
@@ -740,7 +756,7 @@ def _preprocess_df_for_training(
             data_test_df
         )
 
-    data, train_set_metadata = build_dataset_df(
+    data, _, train_set_metadata = build_dataset_df(
         data_df,
         features,
         preprocessing_params,

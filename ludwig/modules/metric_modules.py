@@ -31,12 +31,12 @@ from ludwig.modules.loss_modules import (BWCEWLoss,
 from ludwig.utils.tf_utils import sequence_length_2D, to_sparse
 
 metrics = {ACCURACY, TOKEN_ACCURACY, HITS_AT_K, R2, JACCARD, EDIT_DISTANCE,
-           MEAN_SQUARED_ERROR, MEAN_ABSOLUTE_ERROR,
+           MEAN_SQUARED_ERROR, MEAN_ABSOLUTE_ERROR, ROOT_MEAN_SQUARED_ERROR,
            PERPLEXITY}
 
 max_metrics = {ACCURACY, TOKEN_ACCURACY, HITS_AT_K, R2, JACCARD}
-min_metrics = {EDIT_DISTANCE, MEAN_SQUARED_ERROR, MEAN_ABSOLUTE_ERROR, LOSS,
-               PERPLEXITY}
+min_metrics = {EDIT_DISTANCE, MEAN_SQUARED_ERROR, MEAN_ABSOLUTE_ERROR,
+               ROOT_MEAN_SQUARED_ERROR, LOSS, PERPLEXITY}
 
 
 class R2Score(tf.keras.metrics.Metric):
@@ -79,7 +79,7 @@ class R2Score(tf.keras.metrics.Metric):
         self.sum_y_hat.assign_add(tf.reduce_sum(y_hat))
         self.sum_y_hat_squared.assign_add(tf.reduce_sum(y_hat ** 2))
         self.sum_y_y_hat.assign_add(tf.reduce_sum(y * y_hat))
-        self.N.assign_add(y.shape[0])
+        self.N.assign_add(tf.reshape(y, [-1]).shape[0])
 
     def result(self):
         y_bar = self.sum_y / self.N
@@ -106,7 +106,7 @@ class ErrorScore(tf.keras.metrics.Metric):
         y = tf.cast(y, tf.float32)
         y_hat = tf.cast(y_hat, tf.float32)
         self.sum_error.assign_add(tf.reduce_sum(y - y_hat))
-        self.N.assign_add(y.shape[0])
+        self.N.assign_add(tf.reshape(y, [-1]).shape[0])
 
     def result(self):
         return self.sum_error / self.N
@@ -420,6 +420,58 @@ class JaccardMetric(tf.keras.metrics.Metric):
 
     def result(self):
         return self.jaccard_total / self.N
+
+
+class MeanAbsolutePercentageErrorMetric(tf.keras.metrics.Metric):
+    def __init__(self, eps=0, name='mean_absolute_percentage_error_metric'):
+        super(MeanAbsolutePercentageErrorMetric, self).__init__(name=name)
+        self.sum_pct_error = self.add_weight(
+            'sum_pct_error', initializer='zeros',
+            dtype=tf.float32
+        )
+        self.N = self.add_weight(
+            'N', initializer='zeros',
+            dtype=tf.float32
+        )
+        self.eps = eps
+
+    def update_state(self, y, y_hat):
+        y = tf.cast(y, tf.float32)
+        y_hat = tf.cast(y_hat, tf.float32)
+        abs_errs = tf.abs(y - y_hat)
+        denominators = tf.abs(y) + self.eps
+        self.sum_pct_error.assign_add(100 * tf.reduce_sum(abs_errs / denominators))
+        self.N.assign_add(tf.reshape(y, [-1]).shape[0])
+
+    def result(self):
+        return self.sum_pct_error / self.N
+
+
+class WeightedMeanAbsolutePercentageErrorMetric(tf.keras.metrics.Metric):
+    def __init__(
+                self,
+                eps=0,
+                name='weighted_mean_absolute_percentage_error_metric'
+    ):
+        super().__init__(name=name)
+        self.sum_abs_error = self.add_weight(
+            'sum_abs_error', initializer='zeros',
+            dtype=tf.float32
+        )
+        self.sum_abs_values = self.add_weight(
+            'sum_abs_values', initializer='zeros',
+            dtype=tf.float32
+        )
+        self.eps = eps
+
+    def update_state(self, y, y_hat):
+        y = tf.cast(y, tf.float32)
+        y_hat = tf.cast(y_hat, tf.float32)
+        self.sum_abs_error.assign_add(tf.reduce_sum(tf.abs(y - y_hat)))
+        self.sum_abs_values.assign_add(tf.reduce_sum(tf.abs(y)))
+
+    def result(self):
+        return 100 * self.sum_abs_error / (self.sum_abs_values + self.eps)
 
 
 def get_improved_fun(metric):

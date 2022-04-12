@@ -14,7 +14,8 @@
 
 </div>
 
-Translated in [🇰🇷 Korean](README_KR.md)/
+Translated in [
+🇮🇹 Italiano](README_KR.md) and [🇰🇷 한국인](README_KR.md).
 
 Ludwig is a data-centric deep learning framework that allows users to train and test deep learning models by specifying a declarative configuration that matches the schema of the data.
 It is built on top of PyTorch.

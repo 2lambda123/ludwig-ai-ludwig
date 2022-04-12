@@ -86,6 +86,7 @@ initializer_registry = {
 
 activations = {
     "elu": nn.ELU,
+    "gelu": nn.GELU,
     "leakyRelu": nn.LeakyReLU,
     "logSigmoid": nn.LogSigmoid,
     "relu": nn.ReLU,

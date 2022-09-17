@@ -55,6 +55,7 @@ from ludwig.data.split import get_splitter, split_dataset
 from ludwig.encoders.registry import get_encoder_cls
 from ludwig.features.feature_registries import base_type_registry
 from ludwig.features.feature_utils import compute_feature_hash
+from ludwig.modules import serialization
 from ludwig.utils import data_utils, strings_utils
 from ludwig.utils.backward_compatibility import upgrade_metadata
 from ludwig.utils.config_utils import merge_config_preprocessing_with_feature_specific_defaults
@@ -101,9 +102,12 @@ from ludwig.utils.data_utils import (
     use_credentials,
 )
 from ludwig.utils.defaults import default_preprocessing_parameters, default_random_seed
-from ludwig.utils.fs_utils import file_lock, path_exists
+from ludwig.utils.fs_utils import file_lock, is_url, path_exists
 from ludwig.utils.misc_utils import get_from_registry, merge_dict, resolve_pointers
 from ludwig.utils.types import DataFrame, Series
+
+logger = logging.getLogger(__name__)
+
 
 REPARTITIONING_FEATURE_TYPES = {"image", "audio"}
 
@@ -167,7 +171,7 @@ class DictPreprocessor(DataFormatPreprocessor):
     ):
         num_overrides = override_in_memory_flag(features, True)
         if num_overrides > 0:
-            logging.warning("Using in_memory = False is not supported " "with {} data format.".format("dict"))
+            logger.warning("Using in_memory = False is not supported " "with {} data format.".format("dict"))
 
         df_engine = backend.df_engine
         if dataset is not None:
@@ -224,7 +228,7 @@ class DataFramePreprocessor(DataFormatPreprocessor):
     ):
         num_overrides = override_in_memory_flag(features, True)
         if num_overrides > 0:
-            logging.warning("Using in_memory = False is not supported " "with {} data format.".format("dataframe"))
+            logger.warning("Using in_memory = False is not supported " "with {} data format.".format("dataframe"))
 
         if isinstance(dataset, pd.DataFrame):
             dataset = backend.df_engine.from_pandas(dataset)
@@ -1016,17 +1020,17 @@ class HDF5Preprocessor(DataFormatPreprocessor):
         if not training_set_metadata:
             raise ValueError("When providing HDF5 data, " "training_set_metadata must not be None.")
 
-        logging.info("Using full hdf5 and json")
+        logger.info("Using full hdf5 and json")
 
         if DATA_TRAIN_HDF5_FP not in training_set_metadata:
-            logging.warning(
+            logger.warning(
                 "data_train_hdf5_fp not present in training_set_metadata. "
                 "Adding it with the current HDF5 file path {}".format(not_none_set)
             )
             training_set_metadata[DATA_TRAIN_HDF5_FP] = not_none_set
 
         elif training_set_metadata[DATA_TRAIN_HDF5_FP] != not_none_set:
-            logging.warning(
+            logger.warning(
                 "data_train_hdf5_fp in training_set_metadata is {}, "
                 "different from the current HDF5 file path {}. "
                 "Replacing it".format(training_set_metadata[DATA_TRAIN_HDF5_FP], not_none_set)
@@ -1099,7 +1103,7 @@ def build_dataset(
             # - In this case, the partitions should remain aligned throughout.
             # - Further, while the indices might not be globally unique, they should be unique within each partition.
             # - These two properties make it possible to do the join op within each partition without a global index.
-            logging.warning(
+            logger.warning(
                 f"Dataset has {dataset_df.npartitions} partitions and feature types that cause repartitioning. "
                 f"Resetting index to ensure globally unique indices."
             )
@@ -1109,7 +1113,7 @@ def build_dataset(
 
     sample_ratio = global_preprocessing_parameters["sample_ratio"]
     if sample_ratio < 1.0:
-        logging.debug(f"sample {sample_ratio} of data")
+        logger.debug(f"sample {sample_ratio} of data")
         dataset_df = dataset_df.sample(frac=sample_ratio)
 
     # If persisting DataFrames in memory is enabled, we want to do this after
@@ -1132,7 +1136,7 @@ def build_dataset(
     for feature_config in feature_configs:
         dataset_cols[feature_config[COLUMN]] = dataset_df[feature_config[COLUMN]]
 
-    logging.debug("build preprocessing parameters")
+    logger.debug("build preprocessing parameters")
     feature_name_to_preprocessing_parameters = build_preprocessing_parameters(
         dataset_cols, feature_configs, global_preprocessing_parameters, backend, metadata=metadata
     )
@@ -1274,14 +1278,21 @@ def build_preprocessing_parameters(
 
         # deal with encoders that have fixed preprocessing
         if ENCODER in feature_config:
-            if TYPE in feature_config[ENCODER]:
-                encoder_class = get_encoder_cls(feature_config[TYPE], feature_config[ENCODER][TYPE])
+            encoder_config = feature_config[ENCODER]
+            encoder_fixed_parameters = {}
+            if "pretrained_encoder" in encoder_config and is_url(encoder_config["pretrained_encoder"]):
+                # Since we are loading a pre-trained encoder, fix its preprocessing parameters so that we don't infer
+                # them from the dataset in preprocessing.
+                encoder_state = serialization.load_state_from_file(encoder_config["pretrained_encoder"])
+                encoder_fixed_parameters = encoder_state.metadata
+            elif TYPE in encoder_config:
+                encoder_class = get_encoder_cls(feature_config[TYPE], encoder_config[TYPE])
                 if hasattr(encoder_class, "fixed_preprocessing_parameters"):
-                    encoder_fpp = encoder_class.fixed_preprocessing_parameters
+                    encoder_fixed_parameters = encoder_class.fixed_preprocessing_parameters
 
-                    preprocessing_parameters = merge_dict(
-                        preprocessing_parameters, resolve_pointers(encoder_fpp, feature_config, "feature.")
-                    )
+            preprocessing_parameters = merge_dict(
+                preprocessing_parameters, resolve_pointers(encoder_fixed_parameters, feature_config, "feature.")
+            )
 
         fill_value = precompute_fill_value(dataset_cols, feature_config, preprocessing_parameters, backend)
 
@@ -1333,7 +1344,6 @@ def build_data(
         training_set_metadata: Training set metadata. Additional fields may be added.
         backend: Backend for data processing.
         skip_save_processed_input: (bool) Whether to skip saving the processed input.
-
     Returns:
         Dictionary of (feature name) -> (processed data).
     """
@@ -1366,7 +1376,6 @@ def balance_data(dataset_df: DataFrame, output_features: List[Dict], preprocessi
         output_features: List of feature configs.
         preprocessing_parameters: Dictionary of the global preprocessing parameters.
         backend: Backend for data processing.
-
     Returns: An over-sampled or under-sampled training dataset.
     """
 

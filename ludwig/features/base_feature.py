@@ -23,8 +23,10 @@ from ludwig.constants import HIDDEN, LENGTHS, LOGITS, LOSS, PREDICTIONS, PROBABI
 from ludwig.decoders.registry import get_decoder_cls
 from ludwig.encoders.registry import get_encoder_cls
 from ludwig.features.feature_utils import compute_feature_hash, get_input_size_with_dependencies
+from ludwig.modules import serialization
 from ludwig.modules.fully_connected_modules import FCStack
 from ludwig.modules.loss_modules import get_loss_cls
+from ludwig.modules.ludwig_module import LudwigModule
 from ludwig.modules.metric_modules import MeanMetric
 from ludwig.modules.metric_registry import get_metric_classes, get_metric_cls
 from ludwig.modules.reduction_modules import SequenceReducer
@@ -33,7 +35,7 @@ from ludwig.schema.utils import assert_is_a_marshmallow_class
 from ludwig.utils import output_feature_utils
 from ludwig.utils.calibration import CalibrationModule
 from ludwig.utils.metric_utils import get_scalar_from_ludwig_metric
-from ludwig.utils.torch_utils import LudwigModule
+from ludwig.utils.pytorch_utils import freeze_parameters
 from ludwig.utils.types import DataFrame
 
 logger = logging.getLogger(__name__)
@@ -164,10 +166,15 @@ class InputFeature(BaseFeature, LudwigModule, ABC):
         pass
 
     def initialize_encoder(self, encoder_config):
+        if encoder_config.pretrained_model:
+            encoder = serialization.load(encoder_config.pretrained_model)
+            if encoder_config.trainable:
+                encoder.train()
+            else:
+                freeze_parameters(encoder)
+            return encoder
         encoder_cls = get_encoder_cls(self.type(), encoder_config.type)
-        encoder_schema = encoder_cls.get_schema_cls().Schema()
-        encoder_params_dict = encoder_schema.dump(encoder_config)
-        return encoder_cls(encoder_config=encoder_config, **encoder_params_dict)
+        return encoder_cls(encoder_config)
 
     @classmethod
     def get_preproc_input_dtype(cls, metadata: Dict[str, Any]) -> str:

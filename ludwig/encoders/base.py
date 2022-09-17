@@ -15,11 +15,19 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
+from typing import Any, Dict
 
-from ludwig.utils.torch_utils import LudwigModule
+import torch
+
+from ludwig.modules.ludwig_module import LudwigModule, LudwigModuleState
+from ludwig.schema.encoders.base import BaseEncoderConfig
 
 
 class Encoder(LudwigModule, ABC):
+    def __init__(self, config: BaseEncoderConfig):
+        super().__init__()
+        self.config = config
+
     @abstractmethod
     def forward(self, inputs, training=None, mask=None):
         raise NotImplementedError
@@ -27,3 +35,17 @@ class Encoder(LudwigModule, ABC):
     @property
     def name(self):
         return self.__class__.__name__
+
+    @classmethod
+    def restore_from_state(cls, state: LudwigModuleState) -> "Encoder":
+        schema = cls.get_schema_cls().Schema()
+        encoder_config = schema.load(state.config)
+        encoder = cls(encoder_config)
+        encoder.load_state_dict({k: torch.from_numpy(v) for k, v in state.saved_weights.items()})
+        return encoder
+
+    def get_state(self, metadata: Dict[str, Any] = None) -> LudwigModuleState:
+        return super().get_state(
+            config=self.config.Schema().dump(self.config),
+            metadata=metadata,
+        )

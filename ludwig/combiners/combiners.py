@@ -27,6 +27,7 @@ from ludwig.features.base_feature import InputFeature
 from ludwig.modules.attention_modules import TransformerStack
 from ludwig.modules.embedding_modules import Embed
 from ludwig.modules.fully_connected_modules import FCStack
+from ludwig.modules.ludwig_module import LudwigModule
 from ludwig.modules.reduction_modules import SequenceReducer
 from ludwig.modules.tabnet_modules import TabNet
 from ludwig.schema.combiners.comparator import ComparatorCombinerConfig
@@ -39,7 +40,7 @@ from ludwig.schema.combiners.tabnet import TabNetCombinerConfig
 from ludwig.schema.combiners.transformer import TransformerCombinerConfig
 from ludwig.schema.combiners.utils import combiner_registry, get_combiner_jsonschema, register_combiner
 from ludwig.utils.misc_utils import get_from_registry
-from ludwig.utils.torch_utils import LudwigModule, sequence_length_3D
+from ludwig.utils.torch_utils import sequence_length_3D
 from ludwig.utils.torch_utils import sequence_mask as torch_sequence_mask
 
 logger = logging.getLogger(__name__)
@@ -328,13 +329,22 @@ class SequenceCombiner(Combiner):
             f"combiner input shape {self.combiner.concatenated_shape}, " f"output shape {self.combiner.output_shape}"
         )
 
-        self.encoder_obj = get_from_registry(config.encoder, sequence_encoder_registry)(
-            should_embed=False,
-            reduce_output=config.reduce_output,
-            embedding_size=self.combiner.output_shape[1],
-            max_sequence_length=self.combiner.output_shape[0],
-            **kwargs,
+        # TODO: construct encoder
+        encoder_cls = get_from_registry(config.encoder, sequence_encoder_registry)
+        encoder_config = (
+            encoder_cls.get_schema_cls()
+            .Schema()
+            .load(
+                {
+                    "should_embed": False,
+                    "reduce_output": config.reduce_output,
+                    "embedding_size": self.combiner.output_shape[1],
+                    "max_sequence_length": self.combiner.output_shape[0],
+                    **kwargs,
+                }
+            )
         )
+        self.encoder_obj = encoder_cls(encoder_config)
 
         if hasattr(self.encoder_obj, "supports_masking") and self.encoder_obj.supports_masking:
             self.supports_masking = True

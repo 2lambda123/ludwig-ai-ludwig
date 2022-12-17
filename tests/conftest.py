@@ -146,13 +146,6 @@ def ray_cluster_7cpu(request):
         yield
 
 
-@pytest.fixture(scope="module")
-def ray_cluster_small_object_store(request):
-    # Create a Ray cluster with the smallest possible object store.
-    with _ray_start(request, num_cpus=2, object_store_memory=78643200):
-        yield
-
-
 @contextlib.contextmanager
 def _ray_start(request, **kwargs):
     try:
@@ -168,7 +161,8 @@ def _ray_start(request, **kwargs):
 
     init_kwargs = _get_default_ray_kwargs()
     init_kwargs.update(kwargs)
-    res = ray.init(**init_kwargs)
+    # HACK(geoffrey): `hyperopt_resources` is a required resource for hyperopt to prevent deadlocks in Ludwig tests.
+    res = ray.init(**init_kwargs, resources={"hyperopt_resources": 1000})
     try:
         yield res
     finally:

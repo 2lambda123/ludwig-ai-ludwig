@@ -14,17 +14,18 @@
 # limitations under the License.
 # ==============================================================================
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import torch
 
 from ludwig.api_annotations import DeveloperAPI
-from ludwig.constants import CATEGORY
+from ludwig.constants import CATEGORY, MODEL_ECD, MODEL_GBM
 from ludwig.encoders.base import Encoder
 from ludwig.encoders.registry import register_encoder
 from ludwig.modules.embedding_modules import Embed
 from ludwig.schema.encoders.category_encoders import (
     CategoricalEmbedConfig,
+    CategoricalOneHotEncoderConfig,
     CategoricalPassthroughEncoderConfig,
     CategoricalSparseConfig,
 )
@@ -60,6 +61,10 @@ class CategoricalPassthroughEncoder(Encoder):
     @property
     def output_shape(self) -> torch.Size:
         return self.input_shape
+
+    @classmethod
+    def get_supported_model_types(cls, encoder_params: Dict[str, Any]) -> Set[str]:
+        return {MODEL_ECD, MODEL_GBM}
 
 
 @DeveloperAPI
@@ -171,3 +176,49 @@ class CategoricalSparseEncoder(Encoder):
     @property
     def input_shape(self) -> torch.Size:
         return torch.Size([1])
+
+
+@DeveloperAPI
+@register_encoder("onehot", [CATEGORY])
+class CategoricalOneHotEncoder(Encoder):
+    def __init__(
+        self,
+        vocab: List[str],
+        encoder_config=None,
+        **kwargs,
+    ):
+        super().__init__()
+        self.config = encoder_config
+
+        logger.debug(f" {self.name}")
+        self.vocab_size = len(vocab)
+
+    def forward(self, inputs, mask=None):
+        """
+        :param inputs: The inputs fed into the encoder.
+               Shape: [batch x 1]
+        """
+        t = inputs.squeeze(1).long()
+        return torch.nn.functional.one_hot(t, num_classes=self.vocab_size)
+
+    @staticmethod
+    def get_schema_cls():
+        return CategoricalOneHotEncoderConfig
+
+    @property
+    def input_shape(self) -> torch.Size:
+        return torch.Size([1])
+
+    @property
+    def output_shape(self) -> torch.Size:
+        return torch.Size([self.vocab_size])
+
+    @classmethod
+    def get_fixed_preprocessing_params(cls, encoder_params: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "cache_encoder_embeddings": True,
+        }
+
+    @classmethod
+    def get_supported_model_types(cls, encoder_params: Dict[str, Any]) -> Set[str]:
+        return {MODEL_ECD, MODEL_GBM}

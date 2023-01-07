@@ -3,10 +3,10 @@ from typing import Any, Dict, Set
 from ludwig.api_annotations import DeveloperAPI
 from ludwig.constants import DECODER, ENCODER, IMAGE, INPUT_FEATURES, PREPROCESSING, SEQUENCE, TEXT, TIMESERIES, TYPE
 from ludwig.encoders.registry import get_encoder_cls
-from ludwig.features.feature_registries import get_input_type_registry, get_output_type_registry
-from ludwig.schema.model_config import ModelConfig
+from ludwig.features.feature_registries import get_input_type_registry
+from ludwig.schema.model_config import get_default_decoder_type, get_default_encoder_type, ModelConfig
 from ludwig.types import FeatureConfigDict, FeatureTypeDefaultsDict, PreprocessingConfigDict
-from ludwig.utils.misc_utils import get_from_registry, merge_dict
+from ludwig.utils.misc_utils import merge_dict
 
 
 @DeveloperAPI
@@ -79,22 +79,10 @@ def merge_fixed_preprocessing_params(
 
 
 @DeveloperAPI
-def get_default_encoder_type(feature_type: str) -> str:
-    feature_schema = get_from_registry(feature_type, get_input_type_registry()).get_schema_cls()
-    return feature_schema().encoder.type
-
-
-@DeveloperAPI
-def get_default_decoder_type(feature_type: str) -> str:
-    feature_schema = get_from_registry(feature_type, get_output_type_registry()).get_schema_cls()
-    return feature_schema().decoder.type
-
-
-@DeveloperAPI
 def get_default_encoder_or_decoder(feature: FeatureConfigDict, config_feature_group: str) -> str:
     """Returns the default encoder or decoder for a feature."""
     if config_feature_group == INPUT_FEATURES:
-        return get_default_encoder_type(feature[TYPE])
+        return get_default_decoder_type(feature[TYPE])
     else:
         return get_default_decoder_type(feature[TYPE])
 

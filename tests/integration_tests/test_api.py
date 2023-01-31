@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 import json
+import logging
 import os
 import shutil
 from unittest import mock
@@ -23,10 +24,11 @@ import torch
 
 from ludwig.api import LudwigModel
 from ludwig.callbacks import Callback
-from ludwig.constants import BATCH_SIZE, ENCODER, TRAINER, TYPE
+from ludwig.constants import BATCH_SIZE, ENCODER, MODEL_ECD, MODEL_GBM, TRAINER, TYPE
 from ludwig.globals import MODEL_HYPERPARAMETERS_FILE_NAME
 from ludwig.models.inference import InferenceModule
 from ludwig.utils.data_utils import read_csv
+from ludwig.utils.trainer_utils import WalltimeEarlyStopCallback
 from tests.integration_tests.utils import (
     category_feature,
     ENCODERS,
@@ -479,6 +481,76 @@ def test_api_callbacks(tmpdir, csv_filename, epochs, batch_size, num_examples, s
 
     assert mock_callback.on_eval_end.call_count == total_checkpoints
     assert mock_callback.on_eval_start.call_count == total_checkpoints
+
+
+@pytest.mark.parametrize("model_type", [MODEL_ECD, MODEL_GBM])
+@pytest.mark.parametrize(
+    "timeout_s, timeout_steps, should_timeout",
+    [
+        pytest.param(-1, -1, False, id="no-timeout"),
+        pytest.param(1e-6, -1, True, id="microsecond-timeout"),
+        pytest.param(1e-6, 1, True, id="microsecond-timeout-with-1-step-tolerance"),
+        pytest.param(1e-6, 2, True, id="microsecond-timeout-with-2-step-tolerance"),
+    ],
+)
+def test_early_stop_timeout(model_type, timeout_s, timeout_steps, should_timeout, tmpdir, csv_filename, caplog):
+    num_examples = 3
+
+    input_features = [category_feature()]
+    output_features = [category_feature(decoder={"vocab_size": num_examples}, reduce_input="sum")]
+
+    data_csv = generate_data(
+        input_features, output_features, os.path.join(tmpdir, csv_filename), num_examples=num_examples
+    )
+    df = pd.read_csv(data_csv)
+
+    # map input to output, model should overfit and trigger early stopping
+    df[output_features[0]["name"]] = df[input_features[0]["name"]]
+
+    additional_trainer_params = (
+        {
+            # Set boosting_rounds_per_checkpoint to 1 to check for early stopping at ev
+            "boosting_rounds_per_checkpoint": 1,
+            # Disable feature filtering to avoid having no features due to small test dataset,
+            # see https://stackoverflow.com/a/66405983/5222402
+            "feature_pre_filter": False,
+        }
+        if model_type == MODEL_GBM
+        else {
+            "batch_size": num_examples,
+        }
+    )
+    config = {
+        "model_type": model_type,
+        "input_features": input_features,
+        "output_features": output_features,
+        "combiner": {"type": "concat"},
+        TRAINER: {
+            **{
+                # Disable step-based early stopping to test time-based early stopping
+                "early_stop": -1,
+                "early_stop_timeout_s": timeout_s,
+                "early_stop_timeout_steps": timeout_steps,
+                "validation_metric": "accuracy",
+                "validation_field": output_features[0]["name"],
+            },
+            **additional_trainer_params,
+        },
+    }
+    model = LudwigModel(config)
+
+    with caplog.at_level(logging.INFO, logger="ludwig.trainers.trainer"), caplog.at_level(
+        logging.INFO, logger="ludwig.trainers.trainer_lightgbm"
+    ):
+        model.train(training_set=df, validation_set=df, test_set=df)
+
+    # Make sure that time-based early stopping was triggered as expected
+    if should_timeout:
+        assert "EARLY STOPPING" in caplog.text
+        if timeout_steps > -1:
+            assert f"It has been {timeout_steps} step(s) since last validation improvement." in caplog.text
+    else:
+        assert "EARLY STOPPING" not in caplog.text
 
 
 @pytest.mark.parametrize("epochs", [1, 2])

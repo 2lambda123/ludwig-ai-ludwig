@@ -5,6 +5,7 @@ import signal
 import sys
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import lightgbm as lgb
@@ -423,6 +424,7 @@ class LightGBMTrainer(BaseTrainer):
         eval_metric_value = eval_metric[-1]
 
         if improved(eval_metric_value, progress_tracker.best_eval_metric_value):
+            progress_tracker.last_improvement_timestamp = datetime.now().timestamp()
             previous_best_eval_metric_value = progress_tracker.best_eval_metric_value
 
             # Save the value, steps, epoch, and checkpoint number.
@@ -1006,8 +1008,6 @@ class LightGBMRayTrainer(LightGBMTrainer):
             eval_set=[(s, n) for s, n in zip(eval_sets, eval_names)],
             eval_names=eval_names,
             callbacks=[
-                # add early stopping callback to populate best_iteration
-                lgb.early_stopping(boost_rounds_per_train_step),
                 store_predictions_ray(boost_rounds_per_train_step),
             ],
             additional_results=additional_results,

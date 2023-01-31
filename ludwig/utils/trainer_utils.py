@@ -1,6 +1,9 @@
 import logging
 from collections import defaultdict, OrderedDict
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
+
+from ludwig.callbacks import Callback
 
 try:
     from typing import Literal
@@ -67,6 +70,7 @@ def get_new_progress_tracker(
         last_learning_rate_reduction_steps=0,
         last_increase_batch_size_steps=0,
         last_improvement_steps=0,
+        last_improvement_timestamp=0.0,
         best_eval_metric_value=best_eval_metric_value,
         best_increase_batch_size_eval_metric=best_increase_batch_size_eval_metric,
         last_increase_batch_size_eval_metric_improvement=0,
@@ -97,6 +101,7 @@ class ProgressTracker:
         best_eval_metric_epoch: int,
         best_eval_metric_checkpoint_number: int,
         last_improvement_steps: int,
+        last_improvement_timestamp: float,
         last_learning_rate_reduction_steps: int,
         last_increase_batch_size_steps: int,
         best_eval_metric_value: float,
@@ -170,6 +175,7 @@ class ProgressTracker:
         self.best_eval_metric_epoch = best_eval_metric_epoch
         self.best_eval_metric_checkpoint_number = best_eval_metric_checkpoint_number
         self.last_improvement_steps = last_improvement_steps
+        self.last_improvement_timestamp = last_improvement_timestamp
         self.last_learning_rate_reduction_steps = last_learning_rate_reduction_steps
         self.last_learning_rate_reduction = last_learning_rate_reduction
         self.last_increase_batch_size_steps = last_increase_batch_size_steps
@@ -197,6 +203,10 @@ class ProgressTracker:
         from ludwig.utils.backward_compatibility import upgrade_model_progress
 
         loaded = upgrade_model_progress(progress_tracking_dict)
+
+        # Explicitly reset the improvement timestamp to re-initialize the early stopping timer.
+        loaded["last_improvement_timestamp"] = 0.0
+
         return ProgressTracker(**loaded)
 
     def log_metrics(self):
@@ -207,6 +217,7 @@ class ProgressTracker:
             "tune_checkpoint_num": self.tune_checkpoint_num,
             "checkpoint_number": self.checkpoint_number,
             "last_improvement_steps": self.last_improvement_steps,
+            "last_improvement_timestamp": self.last_improvement_timestamp,
             "best_eval_metric_steps": self.best_eval_metric_steps,
             "best_eval_metric_epoch": self.best_eval_metric_epoch,
             "best_eval_metric_checkpoint_number": self.best_eval_metric_checkpoint_number,
@@ -242,6 +253,40 @@ class ProgressTracker:
                 log_metrics[f"best.test_metrics.{feature_name}.{metric_name}"] = metric_value
 
         return log_metrics
+
+
+@DeveloperAPI
+class WalltimeEarlyStopCallback(Callback):
+    """Callback that stops training when a timeout is reached and no improvement has been made."""
+
+    def __init__(self, timeout_s: float, early_stopping_steps: int = -1) -> None:
+        """Initializes the callback.
+
+        Args:
+            timeout_s: The timeout in seconds. Can be a float to allow for sub-second timeouts.
+            early_stopping_steps: The number of steps to wait before stopping. If -1, the timeout is the only
+                condition for stopping.
+        """
+        super().__init__()
+        self.timeout_delta = timedelta(seconds=timeout_s)
+        self.early_stopping_steps = early_stopping_steps
+
+    def should_early_stop(self, trainer, progress_tracker, is_coordinator):
+        """
+        Returns:
+            True if the timeout has been reached and no improvement has been made for the given early stopping steps.
+        """
+        # Time since last improvement > timeout
+        timed_out = (
+            datetime.now() - datetime.fromtimestamp(progress_tracker.last_improvement_timestamp) > self.timeout_delta
+        )
+
+        # Steps since last improvement >= early stopping steps
+        steps_threshold_met = (self.early_stopping_steps == -1) or (
+            progress_tracker.last_improvement_steps >= self.early_stopping_steps
+        )
+
+        return timed_out and steps_threshold_met
 
 
 @DeveloperAPI

@@ -34,7 +34,37 @@ def register_trainer_schema(model_type: str):
 class BaseTrainerConfig(schema_utils.BaseMarshmallowConfig, ABC):
     """Common trainer parameter values."""
 
-    pass
+    early_stop: int = schema_utils.IntegerRange(
+        default=5,
+        min=-1,
+        description=(
+            "Number of consecutive rounds of evaluation without any improvement on the `validation_metric` that "
+            "triggers training to stop. Can be set to -1, which disables early stopping entirely."
+        ),
+        parameter_metadata=TRAINER_METADATA["early_stop"],
+    )
+
+    early_stop_timeout_s: float = schema_utils.FloatRange(
+        default=-1,
+        min=-1,
+        description=(
+            "Maximum number of seconds to wait for an improvement in the `validation_metric` before stopping "
+            "training. Can be set to -1, which disables early stopping based on time."
+        ),
+        parameter_metadata=TRAINER_METADATA["early_stop_timeout_s"],
+    )
+
+    early_stop_timeout_steps: int = schema_utils.IntegerRange(
+        default=-1,
+        min=-1,
+        description=(
+            "In case of early stopping based on time, this parameter controls how many steps of no improvement "
+            "to allow before stopping training. Can be set to -1, which ignores this parameter. "
+            "The training will timeout after `early_stop_timeout_s` seconds (if set) but will allow for "
+            "`early_stop_timeout_steps` steps (if set) of no improvement in the `validation_metric` before "
+            "stopping training."
+        ),
+    )
 
 
 @DeveloperAPI
@@ -280,16 +310,6 @@ class GBMTrainerConfig(BaseTrainerConfig):
             "updated."
         ),
         parameter_metadata=TRAINER_METADATA["learning_rate"],
-    )
-
-    early_stop: int = schema_utils.IntegerRange(
-        default=5,
-        min=-1,
-        description=(
-            "Number of consecutive rounds of evaluation without any improvement on the `validation_metric` that "
-            "triggers training to stop. Can be set to -1, which disables early stopping entirely."
-        ),
-        parameter_metadata=TRAINER_METADATA["early_stop"],
     )
 
     # LightGBM Learning Control params

@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 
 import pytest
@@ -8,6 +9,7 @@ from ludwig.features.feature_utils import LudwigFeatureDict
 from ludwig.schema.features.category_feature import CategoryOutputFeatureConfig
 from ludwig.schema.utils import load_config_with_kwargs
 from ludwig.utils import trainer_utils
+from ludwig.utils.data_utils import load_json
 from ludwig.utils.metric_utils import TrainerMetric
 
 
@@ -102,6 +104,7 @@ def test_progress_tracker_empty():
         "best_eval_metric_epoch": 0,
         "checkpoint_number": 0,
         "last_improvement_steps": 0,
+        "last_improvement_timestamp": 0.0,
     }
 
 
@@ -139,6 +142,7 @@ def test_progress_tracker():
         "checkpoint_number": 0,
         "epoch": 0,
         "best_eval_metric_steps": 0,
+        "last_improvement_timestamp": 0.0,
         "learning_rate": 0.01,
         "num_increases_bs": 0,
         "num_reductions_lr": 0,
@@ -158,6 +162,7 @@ def test_full_progress_tracker():
             "best_eval_metric_steps": 35,
             "best_eval_metric_value": 0.719,
             "last_improvement_steps": 35,
+            "last_improvement_timestamp": 1673550147.491569,
             "best_eval_test_metrics": {
                 "Survived": {"accuracy": 0.634, "loss": 3.820, "roc_auc": 0.598},
                 "combined": {"loss": 3.820},
@@ -273,6 +278,7 @@ def test_full_progress_tracker():
         "checkpoint_number": 12,
         "epoch": 12,
         "last_improvement_steps": 35,
+        "last_improvement_timestamp": 1673550147.491569,
         "learning_rate": 0.001,
         "num_increases_bs": 0,
         "num_reductions_lr": 0,
@@ -290,6 +296,57 @@ def test_full_progress_tracker():
         "validation_metrics.Survived.loss": 4.473,
         "validation_metrics.Survived.roc_auc": 0.671,
         "validation_metrics.combined.loss": 4.473,
+    }
+
+
+def test_progress_tracker_save_load(tmpdir):
+    output_features = LudwigFeatureDict()
+    category_feature, _ = load_config_with_kwargs(
+        CategoryOutputFeatureConfig,
+        {
+            "name": "category_feature",
+            "decoder": {
+                "type": "classifier",
+            },
+            "num_classes": 3,
+            "input_size": 10,
+        },
+    )
+    output_features["category_feature"] = CategoryOutputFeature(category_feature, {})
+
+    progress_tracker = trainer_utils.get_new_progress_tracker(
+        batch_size=5,
+        best_eval_metric_value=0,
+        best_increase_batch_size_eval_metric=0,
+        learning_rate=0.01,
+        output_features=output_features,
+    )
+
+    save_path = os.path.join(tmpdir, "progress_tracker.json")
+    progress_tracker.save(save_path)
+
+    # Set the last_improvement_timestamp
+    progress_tracker.last_improvement_timestamp = 1673550147.491569
+
+    progress_tracker = trainer_utils.ProgressTracker.load(load_json(save_path))
+
+    # Check that the last_improvement_timestamp is reset to 0, whereas the other
+    # values are the same.
+    assert progress_tracker.log_metrics() == {
+        "batch_size": 5,
+        "best_valid_metric": 0,
+        "epoch": 0,
+        "best_eval_metric_steps": 0,
+        "learning_rate": 0.01,
+        "num_increases_bs": 0,
+        "num_reductions_lr": 0,
+        "steps": 0,
+        "tune_checkpoint_num": 0,
+        "best_eval_metric_checkpoint_number": 0,
+        "best_eval_metric_epoch": 0,
+        "checkpoint_number": 0,
+        "last_improvement_steps": 0,
+        "last_improvement_timestamp": 0.0,
     }
 
 

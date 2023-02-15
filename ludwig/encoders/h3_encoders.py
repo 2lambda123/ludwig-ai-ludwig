@@ -24,10 +24,10 @@ from ludwig.encoders.base import Encoder
 from ludwig.encoders.registry import register_encoder
 from ludwig.modules.embedding_modules import Embed, EmbedSequence
 from ludwig.modules.fully_connected_modules import FCStack
-from ludwig.modules.initializer_modules import get_initializer
 from ludwig.modules.recurrent_modules import RecurrentStack
 from ludwig.modules.reduction_modules import SequenceReducer
 from ludwig.schema.encoders.h3_encoders import H3EmbedConfig, H3RNNConfig, H3WeightedSumConfig
+from ludwig.schema.initializers import get_initialize_cls, InitializerConfig
 from ludwig.utils import torch_utils
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,8 @@ class H3Embed(Encoder):
         num_fc_layers: int = 0,
         output_size: int = 10,
         use_bias: bool = True,
-        weights_initializer: str = "xavier_uniform",
-        bias_initializer: str = "zeros",
+        weights_initializer: InitializerConfig = get_initialize_cls("xavier_uniform"),
+        bias_initializer: InitializerConfig = get_initialize_cls("zeros"),
         norm: str = None,
         norm_params: Dict = None,
         activation: str = "relu",
@@ -228,8 +228,8 @@ class H3WeightedSum(Encoder):
         num_fc_layers: int = 0,
         output_size: int = 10,
         use_bias: bool = True,
-        weights_initializer: str = "xavier_uniform",
-        bias_initializer: str = "zeros",
+        weights_initializer: InitializerConfig = get_initialize_cls("xavier_uniform"),
+        bias_initializer: InitializerConfig = get_initialize_cls("zeros"),
         norm: Optional[str] = None,
         norm_params: Dict = None,
         activation: str = "relu",
@@ -274,9 +274,9 @@ class H3WeightedSum(Encoder):
             reduce_output="None",
         )
 
-        self.register_buffer(
-            "aggregation_weights", torch.Tensor(get_initializer(weights_initializer)([H3_INPUT_SIZE, 1]))
-        )
+        aggregation_weights = torch.empty([H3_INPUT_SIZE, 1])
+        weights_initializer(aggregation_weights)
+        self.register_buffer("aggregation_weights", aggregation_weights)
 
         logger.debug("  FCStack")
         self.fc_stack = FCStack(
@@ -345,9 +345,9 @@ class H3RNN(Encoder):
         recurrent_activation: str = "sigmoid",
         use_bias: bool = True,
         unit_forget_bias: bool = True,
-        weights_initializer: str = "xavier_uniform",
-        recurrent_initializer: str = "orthogonal",
-        bias_initializer: str = "zeros",
+        weights_initializer: InitializerConfig = get_initialize_cls("xavier_uniform"),
+        recurrent_initializer: InitializerConfig = get_initialize_cls("orthogonal"),
+        bias_initializer: InitializerConfig = get_initialize_cls("zeros"),
         dropout: float = 0.0,
         recurrent_dropout: float = 0.0,
         reduce_output: str = "last",
@@ -398,12 +398,12 @@ class H3RNN(Encoder):
         :type unit_forget_bias: bool
         :param weights_initializer: Initializer for the weights (aka kernel)
                matrix
-        :type weights_initializer: string
+        :type weights_initializer: InitializerConfig
         :param recurrent_initializer: Initializer for the recurrent weights
                matrix
-        :type recurrent_initializer: string
+        :type recurrent_initializer: InitializerConfig
         :param bias_initializer: Initializer for the bias vector
-        :type bias_initializer: string
+        :type bias_initializer: InitializerConfig
         :param dropout: determines if there should be a dropout layer before
                returning the encoder output.
         :type dropout: float

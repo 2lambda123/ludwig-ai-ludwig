@@ -1,8 +1,11 @@
+import contextlib
 import os
 from tempfile import TemporaryDirectory
+from typing import Any, Dict, Optional, Type, Union
 
 import pytest
 import yaml
+from marshmallow import ValidationError
 
 from ludwig.constants import (
     ACTIVE,
@@ -34,7 +37,9 @@ from ludwig.constants import (
 )
 from ludwig.schema.features.number_feature import NumberOutputFeatureConfig
 from ludwig.schema.features.text_feature import TextOutputFeatureConfig
+from ludwig.schema.initializers import InitializerConfig, NormalInitializer, UniformInitializer, ZerosInitializer
 from ludwig.schema.model_config import ModelConfig
+from ludwig.schema.model_types.ecd import ECDModelConfig
 from ludwig.schema.utils import BaseMarshmallowConfig, convert_submodules
 
 config_sections = {INPUT_FEATURES, OUTPUT_FEATURES, PREPROCESSING, TRAINER, COMBINER, DEFAULTS, HYPEROPT}
@@ -115,7 +120,7 @@ def test_config_object():
     assert config_object.output_features.category_feature.top_k == 3
 
     assert config_object.combiner.output_size == 512
-    assert config_object.combiner.weights_initializer == "xavier_uniform"
+    assert config_object.combiner.weights_initializer.type == "xavier_uniform"
     assert config_object.combiner.fc_layers is None
 
     assert config_object.trainer.epochs == 50
@@ -610,7 +615,7 @@ def test_initializer_recursion():
 
     config_obj = ModelConfig.from_dict(config)
 
-    assert isinstance(config_obj.combiner.weights_initializer, dict)
+    assert config_obj.combiner.weights_initializer.to_dict() == {"type": "normal", "mean": 0.0, "std": 1.0}
 
 
 def test_number_feature_zscore_preprocessing_default():
@@ -633,3 +638,47 @@ def test_number_feature_zscore_preprocessing_default():
     config_obj = ModelConfig.from_dict(config)
 
     assert config_obj.input_features.number_input_feature1.preprocessing.normalization == "zscore"
+
+
+@pytest.mark.parametrize(
+    "initializer_params,expected",
+    [
+        (None, ZerosInitializer()),
+        ("uniform", UniformInitializer()),
+        ({"type": "normal", "mean": 7, "std": 10}, NormalInitializer(mean=7, std=10)),
+        ("invalid", ValidationError),
+        ({"type": "invalid"}, ValidationError),
+    ],
+)
+def test_bias_initializer(
+    initializer_params: Optional[Union[str, Dict[str, Any]]], expected: Union[Type[ValidationError], InitializerConfig]
+):
+    config = {
+        "input_features": [
+            {
+                "name": "number_input_feature1",
+                "type": "number",
+            },
+        ],
+        "output_features": [
+            {
+                "name": "number_output_feature1",
+                "type": "number",
+            },
+        ],
+        "combiner": {
+            "type": "concat",
+            "bias_initializer": initializer_params,
+        },
+    }
+
+    if initializer_params is None:
+        # Test default
+        del config["combiner"]["bias_initializer"]
+
+    with pytest.raises(ValidationError) if expected == ValidationError else contextlib.nullcontext():
+        config_obj: ECDModelConfig = ModelConfig.from_dict(config)
+
+        bias_initializer = config_obj.combiner.bias_initializer
+        assert isinstance(bias_initializer, InitializerConfig)
+        assert bias_initializer == expected

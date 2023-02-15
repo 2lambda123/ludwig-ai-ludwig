@@ -111,23 +111,6 @@ def periodic(inputs: torch.Tensor, period: int) -> torch.Tensor:
     return torch.cos(inputs * 2 * math.pi / period)
 
 
-initializer_registry = {
-    "uniform": nn.init.uniform_,
-    "normal": nn.init.normal_,
-    "constant": nn.init.constant_,
-    "ones": nn.init.ones_,
-    "zeros": nn.init.zeros_,
-    "eye": nn.init.eye_,
-    "dirac": nn.init.dirac_,
-    "xavier_uniform": nn.init.xavier_uniform_,
-    "xavier_normal": nn.init.xavier_normal_,
-    "kaiming_uniform": nn.init.kaiming_uniform_,
-    "kaiming_normal": nn.init.kaiming_normal_,
-    "orthogonal": nn.init.orthogonal_,
-    "sparse": nn.init.sparse_,
-    "identity": nn.init.eye_,
-}
-
 activations = {
     "elu": nn.ELU,
     "leakyRelu": nn.LeakyReLU,
@@ -258,34 +241,6 @@ class FreezeModule(nn.Module):
             return self
 
         return super().train(mode)
-
-
-@DeveloperAPI
-class Dense(LudwigModule):
-    def __init__(
-        self,
-        input_size,
-        output_size,
-        use_bias=True,
-        weights_initializer="xavier_uniform",
-        bias_initializer="zeros",
-    ):
-        super().__init__()
-        self.dense = nn.Linear(in_features=input_size, out_features=output_size, bias=use_bias)
-        weights_initializer = initializer_registry[weights_initializer]
-        weights_initializer(self.dense.weight)
-
-        if use_bias:
-            bias_initializer = initializer_registry[bias_initializer]
-            bias_initializer(self.dense.bias)
-
-    @property
-    def input_shape(self) -> torch.Size:
-        return self.dense.input_shape
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        output = torch.squeeze(self.dense(input), dim=-1)
-        return output
 
 
 @DeveloperAPI

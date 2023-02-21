@@ -55,6 +55,7 @@ from ludwig.constants import (
 from ludwig.data.dataset.base import Dataset
 from ludwig.data.postprocessing import convert_predictions, postprocess
 from ludwig.data.preprocessing import load_metadata, preprocess_for_prediction, preprocess_for_training
+from ludwig.datasets import load_dataset_uris
 from ludwig.features.feature_registries import update_config_with_metadata, update_config_with_model
 from ludwig.globals import (
     LUDWIG_VERSION,
@@ -1714,6 +1715,7 @@ def kfold_cross_validate(
     gpus: Union[str, int, List[int]] = None,
     gpu_memory_limit: Optional[float] = None,
     allow_parallel_threads: bool = True,
+    callbacks: List[Callback] = None,
     backend: Union[Backend, str] = None,
     logging_level: int = logging.INFO,
     **kwargs,
@@ -1802,11 +1804,15 @@ def kfold_cross_validate(
     # if config is a path, convert to dictionary
     if isinstance(config, str):  # assume path
         config = load_yaml(config)
+    config_obj = ModelConfig.from_dict(config)
     backend = initialize_backend(backend or config.get("backend"))
 
     # check for k_fold
     if num_folds is None:
-        raise ValueError("k_fold parameter must be specified")
+        if config_obj.cross_validation:
+            num_folds = config_obj.cross_validation.num_folds
+        else:
+            raise ValueError("k_fold parameter must be specified")
 
     logger.info(f"starting {num_folds:d}-fold cross validation")
 
@@ -1822,15 +1828,25 @@ def kfold_cross_validate(
     if not data_format or data_format == "auto":
         data_format = figure_data_format(dataset)
 
+    dataset, _, _, _ = load_dataset_uris(dataset, None, None, None, backend)
     data_df = load_dataset(dataset, data_format=data_format, df_lib=backend.df_engine.df_lib)
 
     kfold_cv_stats = {}
     kfold_split_indices = {}
 
+    for callback in callbacks or []:
+        callback.on_kfold_start(num_folds, data_df, random_seed)
+
+    # Only in-memory datasets for now
+    data_df = backend.df_engine.compute(data_df)
+
     for train_indices, test_indices, fold_num in generate_kfold_splits(data_df, num_folds, random_seed):
         with tempfile.TemporaryDirectory() as temp_dir_name:
-            curr_train_df = data_df.iloc[train_indices]
-            curr_test_df = data_df.iloc[test_indices]
+            curr_train_df = backend.df_engine.from_pandas(data_df.iloc[train_indices])
+            curr_test_df = backend.df_engine.from_pandas(data_df.iloc[test_indices])
+
+            for callback in callbacks or []:
+                callback.on_kfold_fold_start(fold_num, curr_train_df, curr_test_df, train_indices, test_indices)
 
             kfold_split_indices["fold_" + str(fold_num)] = {
                 "training_indices": train_indices,
@@ -1843,6 +1859,7 @@ def kfold_cross_validate(
             model = LudwigModel(
                 config=config,
                 logging_level=logging_level,
+                callbacks=callbacks,
                 backend=backend,
                 gpus=gpus,
                 gpu_memory_limit=gpu_memory_limit,
@@ -1874,6 +1891,9 @@ def kfold_cross_validate(
 
             # collect training statistics for this fold
             kfold_cv_stats["fold_" + str(fold_num)] = train_stats_dict
+
+            for callback in callbacks or []:
+                callback.on_kfold_fold_end(fold_num, train_stats_dict)
 
     # consolidate raw fold metrics across all folds
     raw_kfold_stats = {}
@@ -1909,6 +1929,9 @@ def kfold_cross_validate(
             overall_kfold_stats[of_name][metric + "_std"] = std
 
     kfold_cv_stats["overall"] = overall_kfold_stats
+
+    for callback in callbacks or []:
+        callback.on_kfold_end(kfold_cv_stats, kfold_split_indices)
 
     logger.info(f"completed {num_folds:d}-fold cross validation")
 

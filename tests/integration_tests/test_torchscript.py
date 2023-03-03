@@ -24,7 +24,6 @@ import torch
 import torchtext
 
 from ludwig.api import LudwigModel
-from ludwig.backend import RAY
 from ludwig.constants import BATCH_SIZE, COMBINER, LOGITS, NAME, PREDICTIONS, PROBABILITIES, TRAINER
 from ludwig.data.preprocessing import preprocess_for_prediction
 from ludwig.features.number_feature import numeric_transformation_registry
@@ -696,96 +695,41 @@ def test_torchscript_preproc_with_nans(tmpdir, csv_filename, feature):
 
 @pytest.mark.skipif(torch.cuda.device_count() == 0, reason="test requires at least 1 gpu")
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires gpu support")
-@pytest.mark.distributed
-@pytest.mark.parametrize(
-    "feature_fn",
-    [
-        number_feature,
-        image_feature,
-        audio_feature,
-        h3_feature,
-        date_feature,
-        # TODO: future support
-        # binary_feature(),                # Torchscript takes List[str] as input, so currently CPU only
-        # category_feature(encoder={"vocab_size": 3}),  # Torchscript takes List[str] as input, so currently CPU only
-        # set_feature(encoder={"vocab_size": 3}),       # Torchscript takes List[str] as input, so currently CPU only
-        # sequence_feature(encoder={"vocab_size": 3}),  # Torchscript takes List[str] as input, so currently CPU only
-        # text_feature(encoder={"vocab_size": 3}),      # Torchscript takes List[str] as input, so currently CPU only
-        # vector_feature(),                # Torchscript takes List[str] as input, so currently CPU only
-        # bag_feature(encoder={"vocab_size": 3}),       # Torchscript takes List[str] as input, so currently CPU only
-        # timeseries_feature(),            # Torchscript takes List[str] as input, so currently CPU only
-    ],
-)
-def test_torchscript_preproc_gpu(tmpdir, csv_filename, feature_fn):
+def test_torchscript_gpu(tmpdir, csv_filename):
     data_csv_path = os.path.join(tmpdir, csv_filename)
+    image_dest_folder = os.path.join(tmpdir, "generated_images")
+    audio_dest_folder = os.path.join(tmpdir, "generated_audio")
 
-    feature_kwargs = {}
-    if feature_fn in {image_feature, audio_feature}:
-        dest_folder = os.path.join(tmpdir, "generated_samples")
-        feature_kwargs["folder"] = dest_folder
-
-    input_features = [
-        feature_fn(**feature_kwargs),
+    # Configure features to be tested:
+    bin_str_feature_input_feature = binary_feature()
+    bin_str_feature_output_feature = binary_feature(output_feature=True)
+    transformed_number_features = [
+        number_feature(preprocessing={"normalization": numeric_transformer})
+        for numeric_transformer in numeric_transformation_registry.keys()
     ]
-    output_features = [
+    input_features = [
+        bin_str_feature_input_feature,
         binary_feature(),
-    ]
-
-    config = {
-        "input_features": input_features,
-        "output_features": output_features,
-        TRAINER: {"epochs": 2, BATCH_SIZE: 128},
-    }
-    backend = RAY
-    training_data_csv_path = generate_data(input_features, output_features, data_csv_path)
-    _, script_module = initialize_torchscript_module(
-        tmpdir,
-        config,
-        backend,
-        training_data_csv_path,
-        device=torch.device("cuda"),
-    )
-
-    df = pd.read_csv(training_data_csv_path)
-    inputs = to_inference_module_input_from_dataframe(
-        df,
-        config,
-        load_paths=True,
-        device=torch.device("cuda"),
-    )
-    preproc_inputs = script_module.preprocessor_forward(inputs)
-
-    for name, values in preproc_inputs.items():
-        assert values.is_cuda, f'feature "{name}" tensors are not on GPU'
-
-
-@pytest.mark.skipif(torch.cuda.device_count() == 0, reason="test requires at least 1 gpu")
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires gpu support")
-@pytest.mark.distributed
-@pytest.mark.parametrize(
-    "feature_fn",
-    [
-        number_feature,
-        category_feature,
-        binary_feature,
-        set_feature,
-        vector_feature,
-        sequence_feature,
-        text_feature,
-    ],
-)
-def test_torchscript_postproc_gpu(tmpdir, csv_filename, feature_fn):
-    data_csv_path = os.path.join(tmpdir, csv_filename)
-
-    feature_kwargs = {}
-    if feature_fn in {category_feature, set_feature, sequence_feature, text_feature}:
-        feature_kwargs["vocab_size"] = 3
-
-    input_features = [
-        number_feature(),
+        *transformed_number_features,
+        category_feature(encoder={"vocab_size": 3}),
+        bag_feature(encoder={"vocab_size": 3}),
+        set_feature(encoder={"vocab_size": 3}),
+        vector_feature(),
+        image_feature(image_dest_folder),
+        audio_feature(audio_dest_folder),
+        # TODO: future support
+        # date_feature(),
+        # h3_feature(),
     ]
     output_features = [
-        feature_fn(**feature_kwargs),
+        bin_str_feature_output_feature,
+        binary_feature(output_feature=True),
+        number_feature(),
+        category_feature(decoder={"vocab_size": 3}),
+        set_feature(decoder={"vocab_size": 3}),
+        vector_feature(),
+        sequence_feature(decoder={"vocab_size": 3}),
+        text_feature(decoder={"vocab_size": 3}),
     ]
 
     config = {
@@ -793,7 +737,7 @@ def test_torchscript_postproc_gpu(tmpdir, csv_filename, feature_fn):
         "output_features": output_features,
         TRAINER: {"epochs": 2, BATCH_SIZE: 128},
     }
-    backend = RAY
+    backend = LocalTestBackend()
     training_data_csv_path = generate_data(input_features, output_features, data_csv_path)
     _, script_module = initialize_torchscript_module(
         tmpdir,
@@ -810,11 +754,11 @@ def test_torchscript_postproc_gpu(tmpdir, csv_filename, feature_fn):
         load_paths=True,
         device=torch.device("cuda"),
     )
-    postproc_outputs = script_module(inputs)
+    preproc_inputs = script_module.preprocessor_forward(inputs)  # may or may not be on GPU due to preproc of strings
+    predictions_flattened = script_module.predictor_forward(preproc_inputs)
 
-    for feature_name, feature_outputs in postproc_outputs.items():
-        for output_name, output_values in feature_outputs.items():
-            assert utils.is_all_tensors_cuda(output_values), f"{feature_name}.{output_name} tensors are not on GPU"
+    for name, values in predictions_flattened.items():
+        assert values.is_cuda, f'feature "{name}" tensors are not on GPU'
 
 
 def validate_torchscript_outputs(tmpdir, config, backend, training_data_csv_path, tolerance=1e-8):

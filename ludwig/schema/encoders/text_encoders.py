@@ -5,7 +5,7 @@ from ludwig.constants import MODEL_ECD, MODEL_GBM, TEXT
 from ludwig.error import ConfigValidationError
 from ludwig.schema import utils as schema_utils
 from ludwig.schema.encoders.sequence_encoders import SequenceEncoderConfig
-from ludwig.schema.encoders.text.hf_model_params import DebertaModelParams
+from ludwig.schema.encoders.text.hf_model_params import DebertaModelParams, LlamaModelParams
 from ludwig.schema.encoders.utils import register_encoder_config
 from ludwig.schema.metadata import ENCODER_METADATA
 from ludwig.schema.metadata.parameter_metadata import INTERNAL_ONLY, ParameterMetadata
@@ -29,7 +29,7 @@ class HFEncoderConfig(SequenceEncoderConfig):
                 f"Missing required parameter for `{self.type}` encoder: `pretrained_model_name_or_path` when "
                 "`use_pretrained` is True."
             )
-        preprocessing.tokenizer = "hf_tokenizer"
+        preprocessing.tokenizer = self.get_tokenizer_type()
         preprocessing.pretrained_model_name_or_path = model_name
         if not self.can_cache_embeddings():
             preprocessing.cache_encoder_embeddings = False
@@ -40,6 +40,9 @@ class HFEncoderConfig(SequenceEncoderConfig):
     def can_cache_embeddings(self) -> bool:
         """Returns true if the encoder's output embeddings will not change during training."""
         return not self.trainable and self.reduce_output != "attention"
+
+    def get_tokenizer_type(self) -> str:
+        return "hf_tokenizer"
 
 
 @DeveloperAPI
@@ -3032,6 +3035,40 @@ class LongformerConfig(HFEncoderConfig):
         description="Additional kwargs to pass to the pretrained model.",
         parameter_metadata=ENCODER_METADATA["Longformer"]["pretrained_kwargs"],
     )
+
+
+@DeveloperAPI
+@register_encoder_config("llama", TEXT)
+@ludwig_dataclass
+class LlamaConfig(HFEncoderImplConfig, LlamaModelParams):
+    """This dataclass configures the schema used for a LLaMA encoder."""
+
+    @staticmethod
+    def module_name():
+        return "LLaMA"
+
+    type: str = schema_utils.ProtectedString(
+        "llama",
+        # description=ENCODER_METADATA["LLaMA"]["type"].long_description,
+    )
+
+    pretrained_model_name_or_path: str = schema_utils.String(
+        default="decapoda-research/llama-7b-hf",
+        description="Name or path of the pretrained model.",
+    )
+
+    reduce_output: str = schema_utils.String(
+        default="sum",
+        description="The method used to reduce a sequence of tensors down to a single tensor.",
+        parameter_metadata=ENCODER_METADATA["HFEncoder"]["reduce_output"],
+    )
+
+    # TODO(travis): enable when we add PEFT
+    # peft_model_name_or_path: Optional[str] = schema_utils.String(
+    #     default="tloen/alpaca-lora-7b",
+    #     allow_none=True,
+    #     description="Name or path of the pretrained PEFT model.",
+    # )
 
 
 @DeveloperAPI

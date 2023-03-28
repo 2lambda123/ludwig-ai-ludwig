@@ -188,7 +188,7 @@ def train_fn(
 
         model = ray.get(model_ref)
         device = get_torch_device()
-        model = model.to(device)
+        # model = model.to(device)
 
         trainer = RemoteTrainer(model=model, distributed=distributed, report_tqdm_to_ray=True, **executable_kwargs)
         results = trainer.train(train_shard, val_shard, test_shard, **kwargs)
@@ -253,7 +253,7 @@ def tune_batch_size_fn(
         )
 
         device = get_torch_device()
-        model = model.to(device)
+        # model = model.to(device)
 
         trainer = RemoteTrainer(model=model, distributed=distributed, **executable_kwargs)
         return trainer.tune_batch_size(ludwig_config, train_shard, **kwargs)
@@ -295,6 +295,10 @@ class TqdmCallback(ray.tune.callback.Callback):
 @contextlib.contextmanager
 def create_runner(**kwargs):
     trainer_kwargs = get_trainer_kwargs(**kwargs)
+    trainer_kwargs["resources_per_worker"] = {
+        "CPU": 1,
+        "GPU": 1,
+    }
     yield RayAirRunner(trainer_kwargs)
 
 

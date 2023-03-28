@@ -38,6 +38,7 @@ from ludwig.schema.encoders.text_encoders import (
     FlauBERTConfig,
     GPT2Config,
     GPTConfig,
+    LlamaConfig,
     LongformerConfig,
     MT5Config,
     RoBERTaConfig,
@@ -49,7 +50,7 @@ from ludwig.schema.encoders.text_encoders import (
     XLNetConfig,
 )
 from ludwig.utils.hf_utils import load_pretrained_hf_model_with_hub_fallback
-from ludwig.utils.torch_utils import FreezeModule
+from ludwig.utils.torch_utils import FreezeModule, get_torch_device
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig, PreTrainedModel
@@ -158,10 +159,7 @@ class HFTextEncoderImpl(HFTextEncoder):
         vocab_size = kwargs["vocab_size"]
         hf_config_params = {k: v for k, v in kwargs.items() if k in schema_cls.get_hf_config_param_names()}
         if use_pretrained and not saved_weights_in_checkpoint:
-            pretrained_kwargs = pretrained_kwargs or {}
-            transformer, _ = load_pretrained_hf_model_with_hub_fallback(
-                model_cls, pretrained_model_name_or_path, **pretrained_kwargs
-            )
+            transformer = self._load_pretrained_transformer(model_cls, pretrained_model_name_or_path, pretrained_kwargs)
         else:
             transformer = self._init_transformer_from_scratch(model_cls, config_cls, hf_config_params, vocab_size)
 
@@ -175,6 +173,15 @@ class HFTextEncoderImpl(HFTextEncoder):
             self.reduce_sequence = SequenceReducer(reduce_mode=reduce_output)
         self.transformer = FreezeModule(transformer, frozen=not trainable)
         self.max_sequence_length = max_sequence_length
+
+    def _load_pretrained_transformer(
+        self, model_cls: Type[HFModelT], pretrained_model_name_or_path: str, pretrained_kwargs: Dict = None
+    ) -> nn.Module:
+        pretrained_kwargs = pretrained_kwargs or {}
+        transformer, _ = load_pretrained_hf_model_with_hub_fallback(
+            model_cls, pretrained_model_name_or_path, **pretrained_kwargs
+        )
+        return transformer
 
     def forward(self, inputs: torch.Tensor, mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         if mask is not None:
@@ -2133,6 +2140,69 @@ class LongformerEncoder(HFTextEncoder):
     @property
     def input_dtype(self):
         return torch.int32
+
+
+@DeveloperAPI
+@register_encoder("llama", TEXT)
+class LlamaEncoder(HFTextEncoderImpl):
+    def __init__(self, *args, **kwargs):
+        from transformers import LlamaConfig as _LlamaConfig
+        from transformers import LlamaModel
+
+        super().__init__(LlamaModel, _LlamaConfig, LlamaConfig, *args, **kwargs)
+
+    def _load_pretrained_transformer(
+        self, model_cls: Type[HFModelT], pretrained_model_name_or_path: str, pretrained_kwargs: Dict = None
+    ) -> nn.Module:
+        device = get_torch_device()
+        if device == "cuda":
+            default_pretrained_kwargs = dict(
+                load_in_8bit=True,
+                torch_dtype=torch.float16,
+                device_map="auto",
+            )
+        elif device == "mps":
+            default_pretrained_kwargs = dict(device_map={"": device}, torch_dtype=torch.float16)
+        else:
+            default_pretrained_kwargs = dict(device_map={"": device}, low_cpu_mem_usage=True)
+
+        pretrained_kwargs = pretrained_kwargs or default_pretrained_kwargs
+        model, _ = load_pretrained_hf_model_with_hub_fallback(
+            model_cls, pretrained_model_name_or_path, **pretrained_kwargs
+        )
+
+        # TODO(travis): add PEFT support
+        # # LORA / 8bit only supported on GPU
+        # if device == "cuda":
+        #     if self.trainable:
+        #         LORA_R = 8
+        #         LORA_ALPHA = 16
+        #         LORA_DROPOUT = 0.05
+        #         TARGET_MODULES = [
+        #             "q_proj",
+        #             "v_proj",
+        #         ]
+
+        #         model = prepare_model_for_int8_training(model)
+        #         config = LoraConfig(
+        #             r=LORA_R,
+        #             lora_alpha=LORA_ALPHA,
+        #             target_modules=TARGET_MODULES,
+        #             lora_dropout=LORA_DROPOUT,
+        #             bias="none",
+        #             task_type="CAUSAL_LM",
+        #         )
+        #         model = get_peft_model(model, config)
+        #     else:
+        #         # if peft_model_name_or_path is not None:
+        #         #     model = PeftModel.from_pretrained(model, peft_model_name_or_path, torch_dtype=torch.float16)
+        #         pass
+
+        return model
+
+    @staticmethod
+    def get_schema_cls():
+        return LlamaConfig
 
 
 @DeveloperAPI

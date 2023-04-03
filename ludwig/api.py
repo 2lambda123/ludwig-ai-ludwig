@@ -107,6 +107,9 @@ from ludwig.utils.types import DataFrame, TorchDevice
 logger = logging.getLogger(__name__)
 
 
+pd.options.mode.dtype_backend = "pyarrow"
+
+
 @PublicAPI
 @dataclass
 class EvaluationFrequency:

@@ -14,7 +14,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Union
 
 import dask.dataframe as dd
 import numpy as np
@@ -71,7 +71,7 @@ MAX_DISTINCT_VALUES_TO_RETURN = 10
 @dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
 class DatasetInfo:
-    fields: List[FieldInfo]
+    fields: list[FieldInfo]
     row_count: int
     size_bytes: int = -1
 
@@ -102,8 +102,8 @@ def allocate_experiment_resources(resources: Resources) -> dict:
 
 
 def get_resource_aware_hyperopt_config(
-    experiment_resources: Dict[str, Any], time_limit_s: Union[int, float], random_seed: int
-) -> Dict[str, Any]:
+    experiment_resources: dict[str, Any], time_limit_s: Union[int, float], random_seed: int
+) -> dict[str, Any]:
     """Returns a Ludwig config with the hyperopt section populated with appropriate parameters.
 
     Hyperopt parameters are intended to be appropriate for the given resources and time limit.
@@ -132,7 +132,7 @@ def _get_stratify_split_config(field_meta: FieldMetadata) -> dict:
     }
 
 
-def get_default_automl_hyperopt() -> Dict[str, Any]:
+def get_default_automl_hyperopt() -> dict[str, Any]:
     """Returns general, default settings for hyperopt.
 
     For example:
@@ -162,7 +162,7 @@ def get_default_automl_hyperopt() -> Dict[str, Any]:
 def create_default_config(
     features_config: ModelConfigDict,
     dataset_info: DatasetInfo,
-    target_name: Union[str, List[str]],
+    target_name: Union[str, list[str]],
     time_limit_s: Union[int, float],
     random_seed: int,
     imbalance_threshold: float = 0.9,
@@ -181,7 +181,7 @@ def create_default_config(
 
     # Inputs
     :param dataset_info: (str) filepath Dataset Info object.
-    :param target_name: (str, List[str]) name of target feature
+    :param target_name: (str, list[str]) name of target feature
     :param time_limit_s: (int, float) total time allocated to auto_train. acts
                                     as the stopping parameter
     :param random_seed: (int, default: `42`) a random seed that will be used anywhere
@@ -346,17 +346,17 @@ def get_dataset_info_from_source(source: DataSource) -> DatasetInfo:
 
 
 def get_features_config(
-    fields: List[FieldInfo],
+    fields: list[FieldInfo],
     row_count: int,
-    target_name: Union[str, List[str]] = None,
+    target_name: Union[str, list[str]] = None,
 ) -> dict:
     """Constructs FieldInfo objects for each feature in dataset. These objects are used for downstream type
     inference.
 
     # Inputs
-    :param fields: (List[FieldInfo]) FieldInfo objects for all fields in dataset
+    :param fields: (list[FieldInfo]) FieldInfo objects for all fields in dataset
     :param row_count: (int) total number of entries in original dataset
-    :param target_name (str, List[str]) name of target feature
+    :param target_name (str, list[str]) name of target feature
 
     # Return
     :return: (dict) section of auto_train config for input_features and output_features
@@ -366,7 +366,7 @@ def get_features_config(
     return get_config_from_metadata(metadata, targets)
 
 
-def convert_targets(target_name: Union[str, List[str]] = None) -> Set[str]:
+def convert_targets(target_name: Union[str, list[str]] = None) -> set[str]:
     targets = target_name
     if isinstance(targets, str):
         targets = [targets]
@@ -375,12 +375,12 @@ def convert_targets(target_name: Union[str, List[str]] = None) -> Set[str]:
     return set(targets)
 
 
-def get_config_from_metadata(metadata: List[FieldMetadata], targets: Set[str] = None) -> dict:
+def get_config_from_metadata(metadata: list[FieldMetadata], targets: set[str] = None) -> dict:
     """Builds input/output feature sections of auto-train config using field metadata.
 
     # Inputs
-    :param metadata: (List[FieldMetadata]) field descriptions
-    :param targets (Set[str]) names of target features
+    :param metadata: (list[FieldMetadata]) field descriptions
+    :param targets (set[str]) names of target features
 
     # Return
     :return: (dict) section of auto_train config for input_features and output_features
@@ -400,16 +400,16 @@ def get_config_from_metadata(metadata: List[FieldMetadata], targets: Set[str] = 
 
 
 @DeveloperAPI
-def get_field_metadata(fields: List[FieldInfo], row_count: int, targets: Set[str] = None) -> List[FieldMetadata]:
+def get_field_metadata(fields: list[FieldInfo], row_count: int, targets: set[str] = None) -> list[FieldMetadata]:
     """Computes metadata for each field in dataset.
 
     # Inputs
-    :param fields: (List[FieldInfo]) FieldInfo objects for all fields in dataset
+    :param fields: (list[FieldInfo]) FieldInfo objects for all fields in dataset
     :param row_count: (int) total number of entries in original dataset
-    :param targets (Set[str]) names of target features
+    :param targets (set[str]) names of target features
 
     # Return
-    :return: (List[FieldMetadata]) list of objects containing metadata for each field
+    :return: (list[FieldMetadata]) list of objects containing metadata for each field
     """
 
     metadata = []
@@ -435,7 +435,7 @@ def get_field_metadata(fields: List[FieldInfo], row_count: int, targets: Set[str
     return metadata
 
 
-def infer_mode(field: FieldInfo, targets: Set[str] = None) -> str:
+def infer_mode(field: FieldInfo, targets: set[str] = None) -> str:
     if field.name in targets:
         return "output"
     if field.name.lower() == "split":

@@ -16,7 +16,7 @@ input_features:
 import logging
 import re
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torchtext
@@ -61,21 +61,21 @@ class SpaceStringToListTokenizer(torch.nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
 
-    def forward(self, v: Union[str, List[str], torch.Tensor]) -> Any:
+    def forward(self, v: Union[str, list[str], torch.Tensor]) -> Any:
         if isinstance(v, torch.Tensor):
             raise ValueError(f"Unsupported input: {v}")
 
-        inputs: List[str] = []
-        # Ludwig calls map on List[str] objects, so we need to handle individual strings as well.
+        inputs: list[str] = []
+        # Ludwig calls map on list[str] objects, so we need to handle individual strings as well.
         if isinstance(v, str):
             inputs.append(v)
         else:
             inputs.extend(v)
 
-        tokens: List[List[str]] = []
+        tokens: list[list[str]] = []
         for sequence in inputs:
             split_sequence = sequence.strip().split(" ")
-            token_sequence: List[str] = []
+            token_sequence: list[str] = []
             for token in self.get_tokens(split_sequence):
                 if len(token) > 0:
                     token_sequence.append(token)
@@ -83,7 +83,7 @@ class SpaceStringToListTokenizer(torch.nn.Module):
 
         return tokens[0] if isinstance(v, str) else tokens
 
-    def get_tokens(self, tokens: List[str]) -> List[str]:
+    def get_tokens(self, tokens: list[str]) -> list[str]:
         return tokens
 
 
@@ -94,7 +94,7 @@ class NgramTokenizer(SpaceStringToListTokenizer):
         super().__init__()
         self.n = ngram_size or 2
 
-    def get_tokens(self, tokens: List[str]) -> List[str]:
+    def get_tokens(self, tokens: list[str]) -> list[str]:
         from torchtext.data.utils import ngrams_iterator
 
         return list(ngrams_iterator(tokens, ngrams=self.n))
@@ -109,21 +109,21 @@ class SpacePunctuationStringToListTokenizer(torch.nn.Module):
     def is_regex_w(self, c: str) -> bool:
         return c.isalnum() or c == "_"
 
-    def forward(self, v: Union[str, List[str], torch.Tensor]) -> Any:
+    def forward(self, v: Union[str, list[str], torch.Tensor]) -> Any:
         if isinstance(v, torch.Tensor):
             raise ValueError(f"Unsupported input: {v}")
 
-        inputs: List[str] = []
-        # Ludwig calls map on List[str] objects, so we need to handle individual strings as well.
+        inputs: list[str] = []
+        # Ludwig calls map on list[str] objects, so we need to handle individual strings as well.
         if isinstance(v, str):
             inputs.append(v)
         else:
             inputs.extend(v)
 
-        tokens: List[List[str]] = []
+        tokens: list[list[str]] = []
         for sequence in inputs:
-            token_sequence: List[str] = []
-            word: List[str] = []
+            token_sequence: list[str] = []
+            word: list[str] = []
             for c in sequence:
                 if self.is_regex_w(c):
                     word.append(c)
@@ -934,7 +934,7 @@ class SentencePieceTokenizer(torch.nn.Module):
             pretrained_model_name_or_path = "https://download.pytorch.org/models/text/xlmr.sentencepiece.bpe.model"
         self.tokenizer = torchtext.transforms.SentencePieceTokenizer(sp_model_path=pretrained_model_name_or_path)
 
-    def forward(self, v: Union[str, List[str], torch.Tensor]):
+    def forward(self, v: Union[str, list[str], torch.Tensor]):
         if isinstance(v, torch.Tensor):
             raise ValueError(f"Unsupported input: {v}")
         return self.tokenizer(v)
@@ -948,7 +948,7 @@ class _BPETokenizer(torch.nn.Module):
         self.str2idx, self.idx2str = self._init_vocab(vocab_file)
         self.tokenizer = self._init_tokenizer(pretrained_model_name_or_path, vocab_file)
 
-    def _init_vocab(self, vocab_file: str) -> Dict[str, str]:
+    def _init_vocab(self, vocab_file: str) -> dict[str, str]:
         """Loads the vocab from the vocab file."""
         str2idx = load_json(torchtext.utils.get_asset_local_path(vocab_file))
         _, idx2str = zip(*sorted((v, k) for k, v in str2idx.items()))
@@ -958,7 +958,7 @@ class _BPETokenizer(torch.nn.Module):
         """Initializes and returns the tokenizer."""
         raise NotImplementedError
 
-    def forward(self, v: Union[str, List[str], torch.Tensor]) -> Any:
+    def forward(self, v: Union[str, list[str], torch.Tensor]) -> Any:
         """Implements forward pass for tokenizer.
 
         BPE tokenizers from torchtext return ids directly, which is inconsistent with the Ludwig tokenizer API. The
@@ -967,7 +967,7 @@ class _BPETokenizer(torch.nn.Module):
         if isinstance(v, torch.Tensor):
             raise ValueError(f"Unsupported input: {v}")
 
-        inputs: List[str] = []
+        inputs: list[str] = []
         # Ludwig calls map on List[str] objects, so we need to handle individual strings as well.
         if isinstance(v, str):
             inputs.append(v)
@@ -975,12 +975,12 @@ class _BPETokenizer(torch.nn.Module):
             inputs.extend(v)
 
         token_ids = self.tokenizer(inputs)
-        assert torch.jit.isinstance(token_ids, List[List[str]])
+        assert torch.jit.isinstance(token_ids, list[list[str]])
 
         tokens = [[self.idx2str[int(unit_idx)] for unit_idx in sequence] for sequence in token_ids]
         return tokens[0] if isinstance(v, str) else tokens
 
-    def get_vocab(self) -> Dict[str, str]:
+    def get_vocab(self) -> dict[str, str]:
         return self.str2idx
 
 
@@ -1027,7 +1027,7 @@ class BERTTokenizer(torch.nn.Module):
         self,
         vocab_file: Optional[str] = None,
         is_hf_tokenizer: Optional[bool] = False,
-        hf_tokenizer_attrs: Optional[Dict[str, Any]] = None,
+        hf_tokenizer_attrs: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__()
@@ -1083,12 +1083,12 @@ class BERTTokenizer(torch.nn.Module):
 
         self.tokenizer = torchtext.transforms.BERTTokenizer(**tokenizer_init_kwargs)
 
-    def _init_vocab(self, vocab_file: str) -> Dict[str, int]:
+    def _init_vocab(self, vocab_file: str) -> dict[str, int]:
         from transformers.models.bert.tokenization_bert import load_vocab
 
         return load_vocab(vocab_file)
 
-    def forward(self, v: Union[str, List[str], torch.Tensor]) -> Any:
+    def forward(self, v: Union[str, list[str], torch.Tensor]) -> Any:
         """Implements forward pass for tokenizer.
 
         If the is_hf_tokenizer flag is set to True, then the output follows the HF convention, i.e. the output is an
@@ -1100,7 +1100,7 @@ class BERTTokenizer(torch.nn.Module):
         if isinstance(v, torch.Tensor):
             raise ValueError(f"Unsupported input: {v}")
 
-        inputs: List[str] = []
+        inputs: list[str] = []
         # Ludwig calls map on List[str] objects, so we need to handle individual strings as well.
         if isinstance(v, str):
             inputs.append(v)
@@ -1109,9 +1109,9 @@ class BERTTokenizer(torch.nn.Module):
 
         if self.is_hf_tokenizer:
             token_ids_str = self.tokenizer(inputs)
-            assert torch.jit.isinstance(token_ids_str, List[List[str]])
+            assert torch.jit.isinstance(token_ids_str, list[list[str]])
             # Must cast token_ids to ints because they are used directly as indices.
-            token_ids: List[List[int]] = []
+            token_ids: list[list[int]] = []
             for token_ids_str_i in token_ids_str:
                 token_ids_i = [int(token_id_str) for token_id_str in token_ids_str_i]
                 token_ids_i = self._add_special_token_ids(token_ids_i)
@@ -1119,10 +1119,10 @@ class BERTTokenizer(torch.nn.Module):
             return token_ids[0] if isinstance(v, str) else token_ids
 
         tokens = self.tokenizer(inputs)
-        assert torch.jit.isinstance(tokens, List[List[str]])
+        assert torch.jit.isinstance(tokens, list[list[str]])
         return tokens[0] if isinstance(v, str) else tokens
 
-    def get_vocab(self) -> Dict[str, int]:
+    def get_vocab(self) -> dict[str, int]:
         return self.vocab
 
     def get_pad_token(self) -> str:
@@ -1131,7 +1131,7 @@ class BERTTokenizer(torch.nn.Module):
     def get_unk_token(self) -> str:
         return self.unk_token
 
-    def _add_special_token_ids(self, token_ids: List[int]) -> List[int]:
+    def _add_special_token_ids(self, token_ids: list[int]) -> list[int]:
         """Adds special token ids to the token_ids list."""
         if torch.jit.isinstance(self.cls_token_id, int) and torch.jit.isinstance(self.sep_token_id, int):
             token_ids.insert(0, self.cls_token_id)
@@ -1168,7 +1168,7 @@ def get_hf_tokenizer(pretrained_model_name_or_path, **kwargs):
 
     hf_name = pretrained_model_name_or_path
     # use_fast=False to leverage python class inheritance
-    # cannot tokenize HF tokenizers directly because HF lacks strict typing and List[str] cannot be traced
+    # cannot tokenize HF tokenizers directly because HF lacks strict typing and list[str] cannot be traced
     hf_tokenizer = load_pretrained_hf_tokenizer(hf_name, use_fast=False)
 
     torchtext_tokenizer = None

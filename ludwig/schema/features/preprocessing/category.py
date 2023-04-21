@@ -1,5 +1,3 @@
-from typing import List
-
 from ludwig.api_annotations import DeveloperAPI
 from ludwig.constants import CATEGORY, DROP_ROW, FILL_WITH_CONST, MISSING_VALUE_STRATEGY_OPTIONS, PREPROCESSING
 from ludwig.error import ConfigValidationError
@@ -112,7 +110,7 @@ class CategoryDistributionOutputPreprocessingConfig(BasePreprocessingConfig):
         parameter_metadata=FEATURE_METADATA[CATEGORY][PREPROCESSING]["missing_value_strategy"],
     )
 
-    vocab: List[str] = schema_utils.List(default=None)
+    vocab: list[str] = schema_utils.List(default=None)
 
 
 @DeveloperAPI
@@ -125,7 +123,7 @@ class LLMCategoryOutputPreprocessingConfig(CategoryOutputPreprocessingConfig):
         if self.fallback_label is None:
             raise ConfigValidationError("`fallback_label` must be specified for `category_llm` output feature.")
 
-    vocab: List[str] = schema_utils.List(
+    vocab: list[str] = schema_utils.List(
         default=None,
         allow_none=False,
         description="The list of labels that the model can predict.",

@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y nodejs
           sudo mkdir -p /opt/hostedtoolcache/
           sudo chmod 777 -R /opt/hostedtoolcache/
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
@@ -196,11 +196,11 @@ jobs:
 
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python 3.8
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.9
         uses: actions/setup-python@v2
         with:
-          python-version: 3.8
+          python-version: 3.9
 
       - name: Setup Linux
         if: runner.os == 'linux'
@@ -236,11 +236,11 @@ jobs:
 
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python 3.8
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.9
         uses: actions/setup-python@v2
         with:
-          python-version: 3.8
+          python-version: 3.9
 
       - name: Setup Linux
         if: runner.os == 'linux'

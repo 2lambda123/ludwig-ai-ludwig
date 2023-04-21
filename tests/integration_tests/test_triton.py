@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 import os
-from typing import List
 
 import pandas as pd
 import pytest
@@ -133,15 +132,15 @@ def test_triton_torchscript(csv_filename, tmpdir):
     for i, (_, out_value) in enumerate(postprocessor_output.items()):
         both_list = isinstance(out_value, list) and isinstance(triton_postprocessor_output[i], list)
         both_tensor = isinstance(out_value, torch.Tensor) and isinstance(triton_postprocessor_output[i], torch.Tensor)
-        assert both_list or both_tensor, "Type mismatch in PREDICTIONS, PROBABILITIES, LOGITS output"
+        assert both_list or both_tensor, "type mismatch in PREDICTIONS, PROBABILITIES, LOGITS output"
 
         if isinstance(out_value, list) and len(out_value) > 0 and isinstance(out_value[0], str):
             assert out_value == triton_postprocessor_output[i], "Category feature outputs failure."
         elif isinstance(out_value, list) and len(out_value) > 0 and isinstance(out_value[0], torch.Tensor):
-            assert len(out_value) == len(triton_postprocessor_output[i]), "Set feature outputs failure."
+            assert len(out_value) == len(triton_postprocessor_output[i]), "set feature outputs failure."
             assert all(
                 torch.allclose(inf, trit) for inf, trit in zip(out_value, triton_postprocessor_output[i])
-            ), "Set feature outputs failure."
+            ), "set feature outputs failure."
         elif isinstance(out_value, list) and len(out_value) > 0 and isinstance(out_value[0], list):
             assert len(out_value) == len(
                 triton_postprocessor_output[i]
@@ -152,10 +151,10 @@ def test_triton_torchscript(csv_filename, tmpdir):
         elif isinstance(out_value, torch.Tensor):
             assert torch.allclose(out_value, triton_postprocessor_output[i])
         else:
-            raise ValueError("Value should be either List[str] or torch.Tensor.")
+            raise ValueError("Value should be either list[str] or torch.Tensor.")
 
 
-def get_test_config_filenames() -> List[str]:
+def get_test_config_filenames() -> list[str]:
     """Return list of the config filenames used for Triton export."""
     configs_directory = "/".join(__file__.split("/")[:-1] + ["test_triton_configs"])
     return [os.path.join(configs_directory, config_fp) for config_fp in os.listdir(configs_directory)]

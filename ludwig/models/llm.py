@@ -35,18 +35,30 @@ class LLM(BaseModel):
         config_obj: LLMModelConfig,
         random_seed=None,
         device=None,
+        model=None,
+        tokenizer=None,
         **_kwargs,
     ):
         super().__init__(random_seed=random_seed)
 
         self.config_obj = config_obj
-        self._random_seed = random_seed
+        self.random_seed = random_seed
 
         self.model_name = self.config_obj.model_name
 
+        # Initialize the tokenizer. Used only for its metadata about the vocabulary.
+        if not tokenizer:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config_obj.model_name, use_fast=False)
+        else:
+            self.tokenizer = tokenizer
+
         logger.info("Loading large language model...")
-        self.model = AutoModelForCausalLM.from_pretrained(self.config_obj.model_name)
-        self.curr_device = torch.device("cpu")  # model initially loaded onto cpu
+        if not model:
+            self.model = AutoModelForCausalLM.from_pretrained(self.config_obj.model_name)
+            self.curr_device = torch.device("cpu")  # model initially loaded onto cpu
+        else:
+            self.model = model
+            self.curr_device = self.model.device.type
         logger.info("Done.")
 
         self.initialize_adapter()
@@ -63,9 +75,6 @@ class LLM(BaseModel):
         # https://github.com/lm-sys/FastChat/blob/0e958b852a14f4bef5f0e9d7a5e7373477329cf2/fastchat/serve/inference.py#L183  # noqa
         self.max_new_tokens = self.config_obj.generation.max_new_tokens
         self.max_input_length = self.context_len - self.max_new_tokens - 8
-
-        # Used only for its metadata about the vocabulary
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config_obj.model_name, use_fast=False)
 
         self.generation = GenerationConfig(**self.config_obj.generation.to_dict())
 
@@ -415,7 +424,7 @@ class LLM(BaseModel):
         return (
             self.config_obj.input_features.to_list(),
             self.config_obj.output_features.to_list(),
-            self._random_seed,
+            self.random_seed,
         )
 
     def _remove_left_padding(self, input_ids_sample: torch.Tensor):

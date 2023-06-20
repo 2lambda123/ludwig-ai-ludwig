@@ -178,6 +178,60 @@ def test_strip_whitespace_category(csv_filename, tmpdir):
     assert len(np.unique(train_ds.dataset[cat_feat[PROC_COLUMN]])) == cat_feat[DECODER]["vocab_size"]
 
 
+def test_rlhf_reward_model_data_preprocessor():
+    id_column = "reward_session_id"
+    outcome_column = "outcome"
+    chosen_value = "some_value_1"
+    rejected_value = "some_value_2"
+    transcript_column = "transcript"
+
+    # Define the features
+    input_features = [
+        text_feature(
+            name=transcript_column,
+            encoder={"type": "auto_transformer", "pretrained_model_name_or_path": "bert-base-uncased"},
+        )
+    ]
+    output_features = [number_feature(name=id_column)]
+    backend = LocalTestBackend()
+    config = {"input_features": input_features, "output_features": output_features}
+
+    # Generate random dataframe
+    dataframe = generate_data_as_dataframe(input_features, output_features, num_examples=20)
+
+    # Add reward model training pairs
+    dataframe[id_column] = dataframe.index // 2
+    dataframe[outcome_column] = np.where(dataframe.index % 2, rejected_value, chosen_value)
+
+    # Modify config with preprocessing
+    config["preprocessing"] = {
+        "reward_dataset": {
+            "id_column": id_column,
+            "outcome_column": outcome_column,
+            "chosen_value": chosen_value,
+            "rejected_value": rejected_value,
+            "transcript_column": transcript_column,
+        }
+    }
+    config["model_type"] = "rwd"
+
+    # Run preprocessing, get output dataset
+    ludwig_model = LudwigModel(config, backend=backend)
+    train_dataset, _, _, metadata = ludwig_model.preprocess(dataset=dataframe)
+
+    # Validate the processed dataset columns
+    dataset = train_dataset.dataset
+    id_column = config["output_features"][0]["proc_column"]
+    transcript_column = config["input_features"][0]["proc_column"]
+    dataset_columns_expected = sorted([id_column, transcript_column])
+    dataset_columns_actual = sorted(dataset.keys())
+    assert dataset_columns_actual == dataset_columns_expected
+
+    # Validate each row in the processed dataset
+    for row_id in range(len(dataset[id_column])):
+        assert len(dataset[transcript_column][row_id]) == 2
+
+
 @pytest.mark.parametrize(
     "backend",
     [

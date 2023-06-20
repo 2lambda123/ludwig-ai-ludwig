@@ -36,3 +36,12 @@ class ECDModelConfig(ModelConfig):
     preprocessing: PreprocessingConfig = PreprocessingField().get_default_field()
     defaults: ECDDefaultsConfig = ECDDefaultsField().get_default_field()
     hyperopt: Optional[HyperoptConfig] = HyperoptField().get_default_field()
+
+
+@DeveloperAPI
+@register_model_type(name="rwd")
+@ludwig_dataclass
+class RWDModelConfig(ECDModelConfig):
+    """Parameters for RWD (Reward Model)."""
+
+    model_type: str = schema_utils.ProtectedString("rwd")

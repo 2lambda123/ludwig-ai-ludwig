@@ -17,6 +17,7 @@ from tests.integration_tests.utils import (
     binary_feature,
     category_feature,
     generate_data,
+    generate_data_as_dataframe,
     LocalTestBackend,
     number_feature,
     RAY_BACKEND_CONFIG,
@@ -36,6 +37,7 @@ try:
 
     from ludwig.data.dataset.ray import RayDataset
     from ludwig.models.gbm import GBM
+    from ludwig.modules.loss_modules import RewardLoss
     from ludwig.schema.model_config import ModelConfig
     from ludwig.schema.trainer import GBMTrainerConfig
     from ludwig.trainers.trainer_lightgbm import LightGBMRayTrainer
@@ -214,6 +216,62 @@ def test_changing_parameters_on_plateau(tmpdir):
     model = LudwigModel(config, backend=LocalTestBackend())
 
     model.train(training_set=data_csv, validation_set=val_csv, test_set=test_csv, output_directory=tmpdir)
+
+
+def test_rlhf_reward_model_trainer(tmpdir):
+    id_column = "reward_session_id"
+    outcome_column = "outcome"
+    chosen_value = "some_value_1"
+    rejected_value = "some_value_2"
+    transcript_column = "transcript"
+
+    # Define the features
+    input_features = [
+        text_feature(
+            name=transcript_column,
+            encoder={"type": "auto_transformer", "pretrained_model_name_or_path": "gpt2", "trainable": True},
+        )
+    ]
+    output_features = [number_feature(name=id_column)]
+    backend = LocalTestBackend()
+    config = {"input_features": input_features, "output_features": output_features}
+
+    # Generate random dataframe
+    dataframe = generate_data_as_dataframe(input_features, output_features, num_examples=20)
+
+    # Add reward model training pairs
+    dataframe[id_column] = dataframe.index // 2
+    dataframe[outcome_column] = np.where(dataframe.index % 2, rejected_value, chosen_value)
+
+    # Modify config with preprocessing
+    config["preprocessing"] = {
+        "reward_dataset": {
+            "id_column": id_column,
+            "outcome_column": outcome_column,
+            "chosen_value": chosen_value,
+            "rejected_value": rejected_value,
+            "transcript_column": transcript_column,
+        }
+    }
+    config[TRAINER] = {
+        "epochs": 2,
+        BATCH_SIZE: 4,
+        "learning_rate": 1.0,
+    }
+    config["model_type"] = "rwd"
+
+    # Train Ludwig model with the dataset
+    ludwig_model = LudwigModel(config, backend=backend)
+    ludwig_model.train(training_set=dataframe, output_directory=tmpdir)
+
+
+def test_rlhf_reward_model_loss():
+    reward_loss_function = RewardLoss({})
+
+    # Test the reward loss function
+    assert reward_loss_function(torch.tensor(100.0), torch.tensor(50.0)) < torch.tensor(1e-15)
+    assert reward_loss_function(torch.tensor(50.0), torch.tensor(100.0)) > torch.tensor(10)
+    assert reward_loss_function(torch.tensor(100.0), torch.tensor(100.0)) > torch.tensor(0.4)
 
 
 @pytest.mark.distributed

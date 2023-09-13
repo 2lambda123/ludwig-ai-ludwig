@@ -87,6 +87,7 @@ from ray.train._internal.dataset_spec import DataParallelIngestSpec  # noqa: E40
 
 from ludwig.backend.ray import get_trainer_kwargs, RayBackend  # noqa: E402
 from ludwig.data.dataframe.dask import DaskEngine  # noqa: E402
+from ludwig.data.dataset.ray import RayDatasetShard  # noqa: E402
 
 try:
     import modin  # noqa: E402
@@ -1108,3 +1109,25 @@ class TestDatasetWindowAutosizing:
             assert auto_window.num_blocks() < user_window.num_blocks()
             if i > 100:
                 break
+
+
+def test_ray_dataset_count(ray_cluster_2cpu):
+    """Test that our dataset size computation returns the correct size.
+
+    Different versions of Ray Data have different means of determining dataset size from iterator/pipeline. This tests
+    that we return the correct size regardless of underlying batching object.
+    """
+    ds_size = int(ray.cluster_resources()["object_store_memory"]) // 128
+    ds = ray.data.from_pandas(
+        [
+            pd.DataFrame(
+                {
+                    "in_feature": np.random.randint(0, high=100, size=ds_size, dtype=np.uint8),
+                    "out_feature": np.random.randint(0, high=100, size=ds_size, dtype=np.uint8),
+                }
+            )
+        ]
+    )
+    ds_shard = RayDatasetShard(ds.repeat(1).iterator(), {}, {})
+
+    assert len(ds_shard) == ds_size

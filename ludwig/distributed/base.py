@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Mapping, TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -188,13 +188,52 @@ class DistributedStrategy(ABC):
         return MultiNodeCheckpoint(self, model, optimizer, scheduler)
 
     @classmethod
-    def extract_model_for_serialization(cls, model: nn.Module) -> nn.Module | tuple[nn.Module, list[dict]]:
+    def extract_adapter_weights_for_serialization(cls, model: nn.Module) -> Mapping[str, Any]:
+        """Extracts the adapter weights from the model for serialization.
+
+        Applies to adapter based training with deepspeed only. This is a no-op for all other distributed strategies.
+        """
+        return model
+
+    def replace_adapter_weights_from_serialization(model: nn.Module) -> nn.Module:
+        """Replaces the adapter weights from the serialized checkpoint.
+
+        Applies to adapter based training with deepspeed only. This is a no-op for all other distributed strategies.
+        """
         return model
 
     @classmethod
-    def replace_model_from_serialization(cls, state: nn.Module | tuple[nn.Module, list[dict]]) -> nn.Module:
+    def extract_model_for_serialization(
+        cls, model: nn.Module, optimization_stage: int | None = None
+    ) -> nn.Module | tuple[nn.Module, list[dict]]:
+        """Extracts the model weights from the model into numpy tensors for serialization into the Ray object
+        store.
+
+        Applies to deepspeed distributed training only. This is a no-op for all other distributed strategies.
+        """
+        return model
+
+    @classmethod
+    def replace_model_from_serialization(
+        cls,
+        state: nn.Module | tuple[nn.Module, list[dict]],
+        optimization_stage: int | None = None,
+    ) -> nn.Module | tuple[nn.Module, list[dict]]:
+        """Inserts model weights stored as numpy arrays into the model.
+
+        Applies to deepspeed distributed training only. This is a no-op for all other distributed strategies.
+        """
         assert isinstance(state, nn.Module)
         return state
+
+    @property
+    def optimization_stage(self) -> int | None:
+        """This is used in particular by DeepSpeed, which has a different stages for different optimizations for
+        training.
+
+        It is a no-op for all other distributed strategies.
+        """
+        return None
 
 
 class LocalStrategy(DistributedStrategy):

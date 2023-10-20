@@ -64,6 +64,7 @@ from ludwig.trainers.registry import (
 from ludwig.trainers.trainer import BaseTrainer, RemoteTrainer, Trainer
 from ludwig.trainers.trainer_llm import RemoteLLMFineTuneTrainer, RemoteLLMTrainer
 from ludwig.types import HyperoptConfigDict, ModelConfigDict, TrainerConfigDict, TrainingSetMetadataDict
+from ludwig.utils.backend_utils import _get_optimization_stage_from_trainer_config
 from ludwig.utils.batch_size_tuner import BatchSizeEvaluator
 from ludwig.utils.dataframe_utils import is_dask_series_or_df, set_index_name
 from ludwig.utils.fs_utils import get_fs_and_path
@@ -177,6 +178,9 @@ def train_fn(
     # Pin GPU before loading the model to prevent memory leaking onto other devices
     initialize_pytorch(local_rank=session.get_local_rank(), local_size=_local_size())
     distributed = init_dist_strategy(distributed_strategy)
+
+    # If the distributed strategy is not DeepSpeed, this is set to None.
+    distributed_optimization_stage = distributed.optimization_stage
     try:
         train_shard = RayDatasetShard(
             session.get_dataset_shard("train"),
@@ -203,7 +207,9 @@ def train_fn(
         # Deserialize the model (minus weights) from Plasma
         # Extract the weights from Plasma (without copying data)
         # Load the weights back into the model in-place on the current device (CPU)
-        model = distributed.replace_model_from_serialization(ray.get(model_ref))
+        model = distributed.replace_model_from_serialization(
+            ray.get(model_ref), optimization_stage=distributed_optimization_stage
+        )
         model = distributed.to_device(model)
 
         trainer = remote_trainer_cls(
@@ -212,12 +218,16 @@ def train_fn(
             report_tqdm_to_ray=True,
             **executable_kwargs,
         )
+
+        # Trainer returns model/state_dict, progress_tracker.train_metrics,
+        # progress_tracker.validation_metrics and progress_tracker.test_metrics
         results = trainer.train(train_shard, val_shard, test_shard, return_state_dict=True, **kwargs)
         torch.cuda.empty_cache()
 
         # Passing objects containing Torch tensors as metrics is not supported as it will throw an
         # exception on deserialization, so create a checkpoint and return via session.report() along
-        # with the path of the checkpoint
+        # with the path of the checkpoint. This key contains the state dict and progress tracker metrics
+        # that will be deserialized on the driver.
         ckpt = Checkpoint.from_dict({"state_dict": results})
         torch_ckpt = TorchCheckpoint.from_checkpoint(ckpt)
 
@@ -353,6 +363,9 @@ class RayAirRunner:
         trainer_kwargs = copy.copy(trainer_kwargs)
         self.backend_config = trainer_kwargs.pop("backend", None)
         self.strategy = trainer_kwargs.pop("strategy", get_default_strategy_name())
+
+        # Returns a reference to the underlying DistributedStrategy object that will be used
+        # by the trainer without initializing it.
         self.dist_strategy = get_dist_strategy(self.strategy)
 
         if "max_retries" in trainer_kwargs:
@@ -473,6 +486,7 @@ class RayTrainerV2(BaseTrainer):
         test_set: Optional[RayDataset] = None,
         **kwargs,
     ):
+        # Trainer config object for backend
         executable_kwargs = self.executable_kwargs
         kwargs = {
             "training_set_metadata": training_set.training_set_metadata,
@@ -496,7 +510,10 @@ class RayTrainerV2(BaseTrainer):
             # This enables zero copy model loading on each training worker using shared
             # memory from the Ray object store for model initialization.
             dist_strategy = runner.dist_strategy
-            model_ref = ray.put(dist_strategy.extract_model_for_serialization(self.model))
+            optimization_stage = _get_optimization_stage_from_trainer_config(self.trainer_kwargs)
+            model_ref = ray.put(
+                dist_strategy.extract_model_for_serialization(self.model, optimization_stage=optimization_stage)
+            )
             trainer_results = runner.run(
                 lambda config: train_fn(**config),
                 config={
@@ -512,10 +529,14 @@ class RayTrainerV2(BaseTrainer):
             )
 
         # re-register the weights of the model object in the main process
-        self.model = dist_strategy.replace_model_from_serialization(ray.get(model_ref))
+        self.model = dist_strategy.replace_model_from_serialization(
+            ray.get(model_ref), optimization_stage=optimization_stage
+        )
 
         # ensure module is initialized exactly as it is in the trainer process
         # so that the state dict can be loaded back into the model correctly.
+        # It's okay to reload the model this way since we update the model's state
+        # dict with the actual weight checkpoint via load_state_dict below.
         self.model.prepare_for_training()
 
         # Set validation field and metric used by trainer
@@ -529,6 +550,7 @@ class RayTrainerV2(BaseTrainer):
         # load state dict back into the model
         # use `strict=False` to account for PEFT training, where the saved state in the checkpoint
         # might only contain the PEFT layers that were modified during training
+        # *args are progress_tracker metrics for the train, val and test set.
         state_dict, *args = results
         self.model.load_state_dict(state_dict, strict=False)
         results = (self.model, *args)
@@ -646,6 +668,7 @@ def eval_fn(
     distributed_strategy: Union[str, Dict[str, Any]],
     predictor_kwargs: Dict[str, Any] = None,
     model_ref: ObjectRef = None,  # noqa: F821
+    adapter_ref: ObjectRef = None,  # noqa: F821
     training_set_metadata: TrainingSetMetadataDict = None,
     features: Dict[str, Dict] = None,
     **kwargs,
@@ -653,6 +676,9 @@ def eval_fn(
     # Pin GPU before loading the model to prevent memory leaking onto other devices
     initialize_pytorch(local_rank=session.get_local_rank(), local_size=_local_size())
     distributed = init_dist_strategy(distributed_strategy)
+
+    # If the distributed strategy is not DeepSpeed, this is set to None.
+    distributed_optimization_stage = distributed.optimization_stage
     try:
         eval_shard = RayDatasetShard(
             session.get_dataset_shard("eval"),
@@ -663,14 +689,28 @@ def eval_fn(
         # Deserialize the model (minus weights) from Plasma
         # Extract the weights from Plasma (without copying data)
         # Load the weights back into the model in-place on the current device (CPU)
-        model = distributed.replace_model_from_serialization(ray.get(model_ref))
+        model = distributed.replace_model_from_serialization(
+            ray.get(model_ref), optimization_stage=distributed_optimization_stage
+        )
         model = distributed.to_device(model)
 
-        # have to wrap here because we are passing into predictor directly.
+        # We have to wrap here because we are passing into predictor directly.
         # This is in contrast creating the predictor in the trainer class and
         # passing in the model post-wrap.
+        #
+        # For LLMs:
+        # If we are using DeepSpeed Stage 3, this wraps the model in DeepSpeed Zero Inference.
+        # For DeepSpeed Stage 2 and below, this loads the base model weights into the model.
+        # If the model was not trained using an adapter, the fine-tuned weights are loaded into the model.
+        # If the model was trained using an adapter, the base model weights are loaded into the model along with the
+        # adapter weights used at initialization. We will updated the state dict to use the weights from the
+        # fine-tuned adapter.
         dist_model = distributed.prepare_for_inference(model)
+        if adapter_ref and (distributed_optimization_stage and distributed_optimization_stage <= 2):
+            model = distributed.replace_adapter_weights_from_serialization(model, ray.get(adapter_ref))
+            dist_model = distributed.replace_adapter_weights_from_serialization(dist_model, ray.get(adapter_ref))
 
+        # Create an instance of the RayPredictor class
         predictor = get_predictor_cls(model.type())(
             dist_model=dist_model,
             distributed=distributed,
@@ -679,6 +719,7 @@ def eval_fn(
             model=model,
             **predictor_kwargs,
         )
+
         results = predictor.batch_evaluation(eval_shard, **kwargs)
 
         # The result object returned from trainer.fit() contains the metrics from the last session.report() call.
@@ -734,7 +775,10 @@ class RayPredictor(BasePredictor):
 
         # reuse model ref if provided
         if model_ref is None:
-            model_ref = ray.put(dist_strategy.extract_model_for_serialization(self.model))
+            optimization_stage = _get_optimization_stage_from_trainer_config(self.trainer_kwargs)
+            model_ref = ray.put(
+                dist_strategy.extract_model_for_serialization(self.model, optimization_stage=optimization_stage)
+            )
 
         batch_predictor = self.get_batch_infer_model(
             model_ref,
@@ -777,16 +821,29 @@ class RayPredictor(BasePredictor):
         # dataset. In the future, we can explore ways to combine these into a single step to reduce IO.
         with create_runner(**self.trainer_kwargs) as runner:
             dist_strategy = runner.dist_strategy
-            model_ref = ray.put(dist_strategy.extract_model_for_serialization(self.model))
+            predictor_kwargs = {**self.predictor_kwargs, "collect_predictions": False}
+
+            # If the model is a fine-tuned LLM model that uses an adapter, we can just place the adapter
+            # weights in the Ray object store and load them back on each worker since the underlying base
+            # model's weights aren't modified.
+            adapter_ref = None
+            if self.model.trained_using_adapter:
+                adapter_ref = ray.put(dist_strategy.extract_adapter_weights_for_serialization(self.model))
+
+            optimization_stage = _get_optimization_stage_from_trainer_config(self.trainer_kwargs)
+            model_ref = ray.put(
+                dist_strategy.extract_model_for_serialization(self.model, optimization_stage=optimization_stage)
+            )
             # Collect eval metrics by distributing work across nodes / gpus with Horovod
             datasets = {"eval": dataset.ds}
             stream_window_size = {"eval": dataset.window_size_bytes}
-            predictor_kwargs = {**self.predictor_kwargs, "collect_predictions": False}
+
             eval_results = runner.run(
                 lambda config: eval_fn(**config),
                 config={
                     "predictor_kwargs": predictor_kwargs,
                     "model_ref": model_ref,
+                    "adapter_ref": adapter_ref,
                     "training_set_metadata": dataset.training_set_metadata,
                     "features": dataset.features,
                     **kwargs,
@@ -829,9 +886,12 @@ class RayPredictor(BasePredictor):
         **kwargs,
     ):
         class BatchInferModel:
-            def __init__(self):
+            def __init__(self, ray_predictor: "BasePredictor"):  # noqa: F821
                 # only use passed in distributed strategy for loading the model into the worker
-                model = dist_strategy.replace_model_from_serialization(ray.get(model_ref))
+                optimization_stage = _get_optimization_stage_from_trainer_config(ray_predictor.trainer_kwargs)
+                model = dist_strategy.replace_model_from_serialization(
+                    ray.get(model_ref), optimization_stage=optimization_stage
+                )
 
                 # use local strategy for model sharding and batch inference
                 distributed = LocalStrategy()
@@ -874,7 +934,7 @@ class RayPredictor(BasePredictor):
 
                 return res
 
-        return BatchInferModel
+        return BatchInferModel(self)
 
 
 class RayBackend(RemoteTrainingMixin, Backend):

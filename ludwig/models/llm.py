@@ -17,7 +17,13 @@ from ludwig.models.base import BaseModel
 from ludwig.schema.features.base import BaseOutputFeatureConfig, FeatureCollection
 from ludwig.schema.model_types.llm import LLMModelConfig
 from ludwig.utils.augmentation_utils import AugmentationPipelines
+from ludwig.utils.backend_utils import (
+    _default_transformers_cache_dir,
+    _get_backend_type_from_config,
+    _get_deepspeed_optimization_stage_from_config,
+)
 from ludwig.utils.data_utils import clear_data_cache
+from ludwig.utils.fs_utils import file_lock
 from ludwig.utils.llm_utils import (
     add_left_padding,
     generate_merged_ids,
@@ -72,6 +78,55 @@ class DictWrapper:
         self.obj.update(modules)
 
 
+def _should_initialize_model_on_driver(config_obj: LLMModelConfig) -> bool:
+    """Determine if the model should be loaded on the driver or inside training workers.
+
+    This function checks the configuration to decide whether the model should be loaded into memory on the driver
+    or within training workers. If using Ray as the backend and DeepSpeed optimization stage 0, 1, or 2, the model
+    is loaded within the workers since the GPUs need to visible within the RayTrainer process; otherwise, it's
+    loaded at class initialization time.
+
+    Args:
+        config_obj (LLMModelConfig): The language model configuration.
+
+    Returns:
+        bool: True if the model should be loaded on the driver, False otherwise.
+    """
+    backend_type = _get_backend_type_from_config(config_obj)
+    deepspeed_optimization_strategy = _get_deepspeed_optimization_stage_from_config(config_obj)
+    if backend_type == "ray" and deepspeed_optimization_strategy is not None and deepspeed_optimization_strategy <= 2:
+        # If using deepspeed stage 0, 1 or 2, we only load the model into memory once we're actually inside
+        # of the training workers.
+        return False
+    # If using local backend or deepspeed stage 3, we load the model into memory upon class initialization.
+    return True
+
+
+def _get_device_map(config_obj: LLMModelConfig) -> str:
+    """Get the appropriate device map configuration based on backend and strategy.
+
+    This function determines the device map configuration to be used, which is essential for GPU allocation, based
+    on the selected backend and distributed strategy. If Ray is used as the backend and DeepSpeed optimization stage
+    is 0, 1, or 2, it utilizes the local rank device map, suitable for single-node multi-GPU training; otherwise,
+    it defaults to 'auto'.
+
+    Args:
+        config_obj (LLMModelConfig): The language model configuration.
+
+    Returns:
+        str: The device map configuration, either 'cuda:<current_device>' or 'auto'.
+    """
+    # Set device_map load kwarg based on backend and distributed strategy
+    backend_type = _get_backend_type_from_config(config_obj)
+    deepspeed_optimization_strategy = _get_deepspeed_optimization_stage_from_config(config_obj)
+    if backend_type == "ray" and deepspeed_optimization_strategy is not None and deepspeed_optimization_strategy <= 2:
+        # If using deepspeed stage 0, 1 or 2, we need to use the local rank device map
+        # This is safe to do since we only support single node multi-gpu training with deepspeed
+        return f"cuda:{torch.cuda.current_device()}"
+    # Fall back to the default device map
+    return "auto"
+
+
 def load_pretrained_from_config(
     config_obj: LLMModelConfig,
     model_config: Optional[AutoConfig] = None,
@@ -82,7 +137,7 @@ def load_pretrained_from_config(
         # Apply quanitzation configuration at model load time
         load_kwargs["torch_dtype"] = getattr(torch, config_obj.quantization.bnb_4bit_compute_dtype)
         load_kwargs["quantization_config"] = config_obj.quantization.to_bitsandbytes()
-        load_kwargs["device_map"] = "auto"
+        load_kwargs["device_map"] = _get_device_map(config_obj)
 
     if config_obj.model_parameters:
         # Add any model specific parameters to the load kwargs
@@ -97,9 +152,16 @@ def load_pretrained_from_config(
             else:
                 logger.warning(f"Parameter {param_name} is not supported by {config_obj.base_model}. Skipping.")
 
-    logger.info("Loading large language model...")
     pretrained_model_name_or_path = weights_save_path or config_obj.base_model
-    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(pretrained_model_name_or_path, **load_kwargs)
+
+    # When performing data parallel training with DeepSpeed, we need to load the model weights on each worker
+    # but we only want to download the weights once. To do this, we use a file lock to ensure that only one
+    # worker downloads the weights and the other workers load the weights from the cache.
+    with file_lock(path=_default_transformers_cache_dir(), lock_file=".model_weights_lock"):
+        logger.info("Loading large language model...")
+        model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(pretrained_model_name_or_path, **load_kwargs)
+        logger.info("Done.")
+
     return model
 
 
@@ -123,9 +185,12 @@ class LLM(BaseModel):
         self.model_name = self.config_obj.base_model
         self.model_config = AutoConfig.from_pretrained(self.config_obj.base_model)
 
-        self.model = load_pretrained_from_config(self.config_obj, model_config=self.model_config)
-        self.curr_device = next(self.model.parameters()).device
-        logger.info("Done.")
+        if _should_initialize_model_on_driver(self.config_obj):
+            self.model = load_pretrained_from_config(self.config_obj, model_config=self.model_config)
+            self.curr_device = next(self.model.parameters()).device
+        else:
+            self.model = None
+            self.curr_device = torch.device("cpu")
 
         self.context_len = get_context_len(self.model_config)
 
@@ -252,8 +317,25 @@ class LLM(BaseModel):
             self.model.print_trainable_parameters()
             logger.info("==================================================")
 
+    @property
+    def trained_using_adapter(self) -> bool:
+        return bool(self.config_obj.adapter)
+
+    def prepare_for_inference(self):
+        # Reload the model onto the right device with the relevant load kwargs
+        # Only called when using deepspeed stage <= 2.
+        self.model = load_pretrained_from_config(self.config_obj, model_config=self.model_config)
+        if self.config_obj.quantization:
+            self.prepare_for_quantized_training()
+        self.initialize_adapter()
+
     def prepare_for_training(self):
         # TODO: this implementation will not work if resuming from a previous checkpoint. Need to fix this.
+        if not self.model:
+            # If we're using DS stage <= 2, we only load the model into memory once we're actually inside
+            # of the training workers. For local backend and DS stage 3, we load the model into memory
+            # in the LLM model class constructor.
+            self.model = load_pretrained_from_config(self.config_obj, model_config=self.model_config)
         if self.config_obj.quantization:
             self.prepare_for_quantized_training()
         self.initialize_adapter()
@@ -673,10 +755,10 @@ class LLM(BaseModel):
         if self.config_obj.trainer.type != "none":
             weights_save_path = os.path.join(save_path, MODEL_WEIGHTS_FILE_NAME)
             self.model.base_model.save_pretrained(weights_save_path)
-            """While this class initializes the tokenizer (from the base_model) automatically, and hence does not
-            need to be saved if inference is to be done using LudwigModel.predict(), the rationale for saving the
-            tokenizer to HuggingFace Hub is to provide access to models fine-tuned and persisted to HuggingFace Hub
-            using Ludwig at a later time, with the ability to perform inference, independently of Ludwig itself."""
+            # While this class initializes the tokenizer (from the base_model) automatically, and hence does not
+            # need to be saved if inference is to be done using LudwigModel.predict(), the rationale for saving the
+            # tokenizer to HuggingFace Hub is to provide access to models fine-tuned and persisted to HuggingFace Hub
+            # using Ludwig at a later time, with the ability to perform inference, independently of Ludwig itself.
             self.tokenizer.save_pretrained(weights_save_path)
         else:
             logger.info("Skipped saving LLM without weight adjustments.")

@@ -1,5 +1,5 @@
 from ludwig.api_annotations import DeveloperAPI
-from ludwig.constants import DROP_ROW, FILL_WITH_CONST, MISSING_VALUE_STRATEGY_OPTIONS, PREPROCESSING, SET
+from ludwig.constants import DROP_ROW, FILL_WITH_CONST, MISSING_VALUE_STRATEGY_OPTIONS, PREPROCESSING, SET, SHARED
 from ludwig.schema import utils as schema_utils
 from ludwig.schema.features.preprocessing.base import BasePreprocessingConfig
 from ludwig.schema.features.preprocessing.utils import register_preprocessor
@@ -52,11 +52,22 @@ class SetPreprocessingConfig(BasePreprocessingConfig):
     )
 
     most_common: int = schema_utils.PositiveInteger(
-        default=10000,
+        default=None,
         allow_none=True,
         description="The maximum number of most common tokens to be considered. If the data contains more than this "
         "amount, the most infrequent tokens will be treated as unknown.",
-        parameter_metadata=FEATURE_METADATA[SET][PREPROCESSING]["most_common"],
+        parameter_metadata=FEATURE_METADATA[SHARED][PREPROCESSING]["most_common"],
+    )
+
+    most_common_percentile: float = schema_utils.FloatRange(
+        default=0.99,
+        min=0.0,
+        max=1.0,
+        min_inclusive=False,
+        allow_none=False,
+        description="The percentage of most common tokens to be considered. if the data contains more than this "
+        "amount, the most infrequent tokens will be treated as unknown.",
+        parameter_metadata=FEATURE_METADATA[SHARED][PREPROCESSING]["most_common_percentile"],
     )
 
 
@@ -93,5 +104,5 @@ class SetOutputPreprocessingConfig(SetPreprocessingConfig):
         allow_none=True,
         description="The maximum number of most common tokens to be considered. If the data contains more than this "
         "amount, the most infrequent tokens will be treated as unknown.",
-        parameter_metadata=FEATURE_METADATA[SET][PREPROCESSING]["most_common"],
+        parameter_metadata=FEATURE_METADATA[SHARED][PREPROCESSING]["most_common"],
     )

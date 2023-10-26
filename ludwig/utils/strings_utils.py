@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+import collections
 import logging
+import math
 import re
 import unicodedata
 from collections import Counter
@@ -22,6 +24,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Set, Union
 
 import numpy as np
+import pandas as pd
 from dateutil.parser import parse as parse_datetime
 
 from ludwig.constants import PADDING_SYMBOL, START_SYMBOL, STOP_SYMBOL, UNKNOWN_SYMBOL
@@ -244,11 +247,32 @@ class Vocabulary:
     """Actual unknown symbol."""
 
 
+def figure_truncation_threshold(
+    processed_counts: pd.Series, unit_counts: collections.Counter, most_common_percentile: float
+):
+    """We truncate the vocab based on the total count of tokens.
+
+    If most_common_percentile is 0.95 and the total number of tokens is 100,000 then the total number of token we end up
+    with after the truncation is 95,000 or more. We look at the least frequent tokens and remove those that will keep
+    the total number of tokens greater or equal to 95,000.
+    """
+    token_counts = processed_counts.sum()
+    min_num_tokens_to_keep = math.ceil(token_counts * most_common_percentile)
+    most_common = len(unit_counts)
+    for token, frequency in reversed(unit_counts.most_common()):
+        token_counts -= frequency
+        if token_counts < min_num_tokens_to_keep:
+            break
+        most_common -= 1
+    return most_common
+
+
 def create_vocabulary(
     data: Series,
+    most_common_percentile: float,
     tokenizer_type: str = "space",
     lowercase: bool = True,
-    num_most_frequent: int = None,
+    most_common: int = None,
     vocab_file: str = None,
     add_special_symbols: bool = True,
     unknown_symbol: str = UNKNOWN_SYMBOL,
@@ -278,7 +302,8 @@ def create_vocabulary(
         data: Series of string data.
         tokenizer_type: Tokenizer type. Can be a tokenizer registry value or 'hf_tokenizer' for huggingface.
         lowercase: Whether to lowercase all strings.
-        num_most_frequent: Upper limit on vocabulary size.,
+        most_common_percentile: Percent upper limit on vocabulary size.
+        most_common: Upper limit on vocabulary size.
         add_special_symbols: If True, START, STOP, PADDING special symbols are added to the vocabulary. UNKNOWN is
             always added.
         unknown_symbol: String representation for the UNKNOWN symbol.
@@ -365,8 +390,13 @@ def create_vocabulary(
     line_length_max = processor.compute(processed_lines.map(len).max())
     line_length_99ptile = processor.compute(processed_lines.map(len).quantile(0.99))
 
+    if not most_common:
+        most_common = figure_truncation_threshold(processed_counts, unit_counts, most_common_percentile)
     if vocab is None:
-        vocab = [unit for unit, _ in unit_counts.most_common(num_most_frequent)]
+        logger.info(
+            f"Truncating the vocab to {most_common} tokens. " f"The original vocab size was {len(unit_counts)}."
+        )
+        vocab = [unit for unit, _ in unit_counts.most_common(most_common)]
 
     vocab_set = set(vocab)
 
@@ -405,7 +435,8 @@ def create_vocabulary(
 
 def create_vocabulary_single_token(
     data: Series,
-    num_most_frequent: Optional[int] = None,
+    most_common_percentile: float,
+    most_common: Optional[int] = None,
     processor: DataFrameEngine = PANDAS,
     unknown_symbol: str = UNKNOWN_SYMBOL,
 ):
@@ -419,7 +450,8 @@ def create_vocabulary_single_token(
 
     Args:
         data: Series of string data.
-        num_most_frequent: Upper limit on vocabulary size.
+        most_common_percentile: Percent upper limit on vocabulary size.
+        most_common: Upper limit on vocabulary size.
         unknown_symbol: String representation for the UNKNOWN symbol.
         processor: Which processor to use to process data.
 
@@ -431,12 +463,21 @@ def create_vocabulary_single_token(
     """
     processed_counts = data.str.strip().value_counts(sort=True)
     processed_counts = processor.compute(processed_counts)
+    unit_counts = Counter(dict(processed_counts))
     full_vocab = processed_counts.index.tolist()
     # Only add unknown symbol if num most frequent tokens is less than total number of unique tokens
-    if num_most_frequent < len(full_vocab):
-        vocab = [unknown_symbol] + full_vocab[:num_most_frequent]
+
+    if not most_common:
+        most_common = figure_truncation_threshold(processed_counts, unit_counts, most_common_percentile)
+
+    if most_common < len(full_vocab):
+        logger.info(
+            f"Truncating the vocab to {most_common} tokens. " f"The original vocab size was {len(unit_counts)}."
+        )
+        vocab = [unknown_symbol] + [unit for unit, _ in unit_counts.most_common(most_common)]
     else:
         vocab = full_vocab
+
     str2idx = {unit: i for i, unit in enumerate(vocab)}
     str2freq = processed_counts.to_dict()
     str2freq = {k: str2freq.get(k, 0) for k in vocab}

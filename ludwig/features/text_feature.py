@@ -55,6 +55,7 @@ from ludwig.utils.strings_utils import (
     UNKNOWN_SYMBOL,
     Vocabulary,
 )
+from ludwig.utils.types import Series
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +87,12 @@ class TextFeatureMixin(BaseFeatureMixin):
         return column.astype(str)
 
     @staticmethod
-    def feature_meta(column, preprocessing_parameters: PreprocessingConfigDict, backend) -> Vocabulary:
+    def feature_meta(column: Series, preprocessing_parameters: PreprocessingConfigDict, backend) -> Vocabulary:
         return create_vocabulary(
             column,
             tokenizer_type=preprocessing_parameters["tokenizer"],
-            num_most_frequent=preprocessing_parameters["most_common"],
+            most_common_percentile=preprocessing_parameters["most_common_percentile"],
+            most_common=preprocessing_parameters["most_common"],
             lowercase=preprocessing_parameters["lowercase"],
             vocab_file=preprocessing_parameters["vocab_file"],
             unknown_symbol=preprocessing_parameters["unknown_symbol"],

@@ -70,7 +70,8 @@ def test_create_vocabulary_chars():
     vocabulary = strings_utils.create_vocabulary(
         column,
         tokenizer_type="characters",
-        num_most_frequent=preprocessing_parameters["most_common"],
+        most_common_percentile=preprocessing_parameters["most_common_percentile"],
+        most_common=preprocessing_parameters["most_common"],
         lowercase=preprocessing_parameters["lowercase"],
         unknown_symbol=preprocessing_parameters["unknown_symbol"],
         padding_symbol=preprocessing_parameters["padding_symbol"],
@@ -93,7 +94,8 @@ def test_create_vocabulary_word():
     vocabulary = strings_utils.create_vocabulary(
         column,
         tokenizer_type=preprocessing_parameters["tokenizer"],
-        num_most_frequent=preprocessing_parameters["most_common"],
+        most_common_percentile=preprocessing_parameters["most_common_percentile"],
+        most_common=preprocessing_parameters["most_common"],
         lowercase=preprocessing_parameters["lowercase"],
         vocab_file=preprocessing_parameters["vocab_file"],
         unknown_symbol=preprocessing_parameters["unknown_symbol"],
@@ -109,15 +111,19 @@ def test_create_vocabulary_word():
     assert vocab[strings_utils.SpecialSymbol.UNKNOWN.value] == strings_utils.UNKNOWN_SYMBOL
 
 
-def test_create_vocabulary_no_special_symbols():
+@pytest.mark.parametrize("most_common_percentile,most_common,expected_vocab_size", [(0.5, None, 7), (0.9, 10, 11)])
+def test_create_vocabulary_no_special_symbols(most_common_percentile, most_common, expected_vocab_size):
     data = pd.DataFrame(["Hello, I'm a single sentence!", "And another sentence", "And the very very last one"])
     column = data[0]
-    preprocessing_parameters = TextPreprocessingConfig().to_dict()
+    preprocessing_parameters = TextPreprocessingConfig(
+        most_common_percentile=most_common_percentile, most_common=most_common
+    ).to_dict()
 
     vocabulary = strings_utils.create_vocabulary(
         column,
         tokenizer_type=preprocessing_parameters["tokenizer"],
-        num_most_frequent=preprocessing_parameters["most_common"],
+        most_common_percentile=preprocessing_parameters["most_common_percentile"],
+        most_common=preprocessing_parameters["most_common"],
         lowercase=preprocessing_parameters["lowercase"],
         vocab_file=preprocessing_parameters["vocab_file"],
         unknown_symbol=preprocessing_parameters["unknown_symbol"],
@@ -127,7 +133,7 @@ def test_create_vocabulary_no_special_symbols():
     )
     vocab = vocabulary.vocab
 
-    assert len(vocab) == 16
+    assert len(vocab) == expected_vocab_size
     assert vocab[strings_utils.SpecialSymbol.UNKNOWN.value] == strings_utils.UNKNOWN_SYMBOL
 
 
@@ -139,7 +145,8 @@ def test_create_vocabulary_from_hf():
     vocabulary = strings_utils.create_vocabulary(
         column,
         tokenizer_type="hf_tokenizer",
-        num_most_frequent=preprocessing_parameters["most_common"],
+        most_common_percentile=preprocessing_parameters["most_common_percentile"],
+        most_common=preprocessing_parameters["most_common"],
         lowercase=preprocessing_parameters["lowercase"],
         unknown_symbol=preprocessing_parameters["unknown_symbol"],
         padding_symbol=preprocessing_parameters["padding_symbol"],
@@ -156,7 +163,8 @@ def test_create_vocabulary_single_token():
 
     vocab, str2idx, str2freq = strings_utils.create_vocabulary_single_token(
         column,
-        num_most_frequent=10000,
+        most_common=10000,
+        most_common_percentile=0.5,
     )
 
     assert set(vocab) == {"dog", "cat", "bird", "super cat"}
@@ -168,7 +176,9 @@ def test_create_vocabulary_single_token_small_most_frequent():
     data = pd.DataFrame(["dog", "cat", "bird", "dog", "cat", "super cat"])
     column = data[0]
 
-    vocab, str2idx, str2freq = strings_utils.create_vocabulary_single_token(column, num_most_frequent=2)
+    vocab, str2idx, str2freq = strings_utils.create_vocabulary_single_token(
+        column, most_common=2, most_common_percentile=0.5
+    )
 
     assert set(vocab) == {"dog", "cat", strings_utils.UNKNOWN_SYMBOL}
     assert str2idx[strings_utils.UNKNOWN_SYMBOL] == 0
@@ -203,7 +213,8 @@ def test_create_vocabulary_idf(compute_idf: bool):
     vocabulary = strings_utils.create_vocabulary(
         column,
         tokenizer_type=preprocessing_parameters["tokenizer"],
-        num_most_frequent=preprocessing_parameters["most_common"],
+        most_common_percentile=preprocessing_parameters["most_common_percentile"],
+        most_common=preprocessing_parameters["most_common"],
         lowercase=preprocessing_parameters["lowercase"],
         vocab_file=preprocessing_parameters["vocab_file"],
         unknown_symbol=preprocessing_parameters["unknown_symbol"],

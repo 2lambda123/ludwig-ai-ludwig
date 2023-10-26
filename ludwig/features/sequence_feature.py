@@ -203,9 +203,10 @@ class SequenceFeatureMixin(BaseFeatureMixin):
     ) -> FeatureMetadataDict:
         vocabulary = create_vocabulary(
             column,
-            preprocessing_parameters["tokenizer"],
+            tokenizer_type=preprocessing_parameters["tokenizer"],
             lowercase=preprocessing_parameters["lowercase"],
-            num_most_frequent=preprocessing_parameters["most_common"],
+            most_common_percentile=preprocessing_parameters["most_common_percentile"],
+            most_common=preprocessing_parameters["most_common"],
             vocab_file=preprocessing_parameters["vocab_file"],
             unknown_symbol=preprocessing_parameters["unknown_symbol"],
             padding_symbol=preprocessing_parameters["padding_symbol"],

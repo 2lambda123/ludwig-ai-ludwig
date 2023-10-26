@@ -671,8 +671,8 @@ def FloatRange(
     allow_none: bool = False,
     description: str = "",
     parameter_metadata: ParameterMetadata = None,
-    min: int = None,
-    max: int = None,
+    min: Union[int, float] = None,
+    max: Union[int, float] = None,
     min_inclusive: bool = True,
     max_inclusive: bool = True,
 ):

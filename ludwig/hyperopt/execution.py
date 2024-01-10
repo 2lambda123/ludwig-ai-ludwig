@@ -18,9 +18,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import ray
 from packaging import version
-from ray import tune
-from ray.air import Checkpoint
+from pyarrow.fs import FileSystem
+from ray import train, tune
 from ray.air.config import CheckpointConfig, FailureConfig, RunConfig
+from ray.train import Checkpoint
 from ray.tune import ExperimentAnalysis, register_trainable, Stopper, TuneConfig
 from ray.tune.execution.placement_groups import PlacementGroupFactory
 from ray.tune.schedulers.resource_changing_scheduler import DistributeResources, ResourceChangingScheduler
@@ -124,8 +125,8 @@ def checkpoint(progress_tracker, save_path):
     def ignore_dot_files(src, files):
         return [f for f in files if f.startswith(".")]
 
-    with tune.checkpoint_dir(step=progress_tracker.tune_checkpoint_num) as checkpoint_dir:
-        checkpoint_model = os.path.join(checkpoint_dir, "model")
+    with tempfile.TemporaryDirectory() as temp_checkpoint_dir:
+        checkpoint_model = os.path.join(temp_checkpoint_dir, "model")
         # Atomic copying of the checkpoints
         if not os.path.isdir(checkpoint_model):
             copy_id = uuid.uuid4()
@@ -385,14 +386,17 @@ class RayTuneExecutor:
             logger.warning("No best model found")
             yield None
 
-        ckpt_type, ckpt_path = checkpoint.get_internal_representation()
-        if ckpt_type == "uri":
+        ckpt_path = checkpoint.path
+        # The filesystem used by the checkpoint should be a pyarrow filesystem object
+        assert isinstance(checkpoint.filesystem, FileSystem)
+
+        if checkpoint.filesystem.type_name == "local":
+            yield ckpt_path
+        else:
             # Read remote URIs using Ludwig's internal remote file loading APIs, as
             # Ray's do not handle custom credentials at the moment.
             with tempfile.TemporaryDirectory() as tmpdir:
                 yield _download_local_tmpdir(ckpt_path, tmpdir, creds)
-        else:
-            yield ckpt_path
 
     @staticmethod
     def _evaluate_best_model(
@@ -463,8 +467,8 @@ class RayTuneExecutor:
         if "mlflow" in config:
             del config["mlflow"]
 
-        trial_id = tune.get_trial_id()
-        trial_dir = Path(tune.get_trial_dir())
+        trial_id = ray.train.get_context().get_trial_id()
+        trial_dir = Path(ray.train.get_context().get_trial_dir())
 
         modified_config = substitute_parameters(copy.deepcopy(hyperopt_dict["config"]), config)
 
@@ -495,13 +499,16 @@ class RayTuneExecutor:
             }
 
             metric_score = tune_executor.get_metric_score(train_stats, split)
-            tune.report(
-                parameters=json.dumps(config, cls=NumpyEncoder),
-                metric_score=metric_score,
-                training_stats=json.dumps(train_stats, cls=NumpyEncoder),
-                eval_stats="{}",
-                trial_id=tune.get_trial_id(),
-                trial_dir=tune.get_trial_dir(),
+            train.report(
+                {
+                    "parameters": json.dumps(config, cls=NumpyEncoder),
+                    "metric_score": metric_score,
+                    "training_stats": json.dumps(train_stats, cls=NumpyEncoder),
+                    "eval_stats": "{}",
+                    "trial_id": ray.train.get_context().get_trial_id(),
+                    "trial_dir": ray.train.get_context().get_trial_dir(),
+                },
+                checkpoint=Checkpoint.from_directory(ray.train.get_context().get_trial_dir()),
             )
 
         class RayTuneReportCallback(Callback):
@@ -657,13 +664,16 @@ class RayTuneExecutor:
         train_stats, eval_stats = stats.pop()
 
         metric_score = self.get_metric_score(train_stats, hyperopt_dict["eval_split"])
-        tune.report(
-            parameters=json.dumps(config, cls=NumpyEncoder),
-            metric_score=metric_score,
-            training_stats=json.dumps(train_stats, cls=NumpyEncoder),
-            eval_stats=json.dumps(eval_stats, cls=NumpyEncoder),
-            trial_id=tune.get_trial_id(),
-            trial_dir=tune.get_trial_dir(),
+        train.report(
+            {
+                "parameters": json.dumps(config, cls=NumpyEncoder),
+                "metric_score": metric_score,
+                "training_stats": json.dumps(train_stats, cls=NumpyEncoder),
+                "eval_stats": "{}",
+                "trial_id": ray.train.get_context().get_trial_id(),
+                "trial_dir": ray.train.get_context().get_trial_dir(),
+            },
+            checkpoint=Checkpoint.from_directory(ray.train.get_context().get_trial_dir()),
         )
 
     def execute(
@@ -776,12 +786,23 @@ class RayTuneExecutor:
             else:
                 search_alg = ConcurrencyLimiter(search_alg, max_concurrent=self.max_concurrent_trials)
 
-        def run_experiment_trial(config, local_hyperopt_dict, checkpoint_dir=None):
+        def run_experiment_trial(config, local_hyperopt_dict):
             # Checkpoint dir exists when trials are temporarily paused and resumed, for e.g.,
             # when using the HB_BOHB scheduler.
+            checkpoint = train.get_checkpoint()
+            if checkpoint:
+                with checkpoint.as_directory() as checkpoint_dir:
+                    return self._run_experiment(
+                        config,
+                        checkpoint_dir,
+                        local_hyperopt_dict,
+                        self.decode_ctx,
+                        _is_ray_backend(backend),
+                    )
+
             return self._run_experiment(
                 config,
-                checkpoint_dir,
+                None,
                 local_hyperopt_dict,
                 self.decode_ctx,
                 _is_ray_backend(backend),
@@ -872,7 +893,7 @@ class RayTuneExecutor:
                     ),
                     run_config=RunConfig(
                         name=experiment_name,
-                        local_dir=output_directory,
+                        local_dir=str(output_directory),
                         stop=CallbackStopper(callbacks),
                         callbacks=tune_callbacks,
                         failure_config=FailureConfig(

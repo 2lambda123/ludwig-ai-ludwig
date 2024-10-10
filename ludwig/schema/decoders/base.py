@@ -37,8 +37,8 @@ class BaseDecoderConfig(schema_utils.BaseMarshmallowConfig, ABC):
     fc_layers: List[dict] = common_fields.FCLayersField()
 
     num_fc_layers: int = common_fields.NumFCLayersField(
-        description="Number of fully-connected layers if `fc_layers` not specified."
-    )
+        description=
+        "Number of fully-connected layers if `fc_layers` not specified.")
 
     fc_output_size: int = schema_utils.PositiveInteger(
         default=256,
@@ -55,35 +55,47 @@ class BaseDecoderConfig(schema_utils.BaseMarshmallowConfig, ABC):
     fc_weights_initializer: Union[str, Dict] = schema_utils.OneOfOptionsField(
         default="xavier_uniform",
         allow_none=True,
-        description="The weights initializer to use for the layers in the fc_stack",
+        description=
+        "The weights initializer to use for the layers in the fc_stack",
         field_options=[
             schema_utils.InitializerOptions(
-                description="Preconfigured initializer to use for the layers in the fc_stack.",
-                parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_weights_initializer"],
+                description=
+                "Preconfigured initializer to use for the layers in the fc_stack.",
+                parameter_metadata=DECODER_METADATA["BaseDecoder"]
+                ["fc_weights_initializer"],
             ),
             schema_utils.Dict(
-                description="Custom initializer to use for the layers in the fc_stack.",
-                parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_weights_initializer"],
+                description=
+                "Custom initializer to use for the layers in the fc_stack.",
+                parameter_metadata=DECODER_METADATA["BaseDecoder"]
+                ["fc_weights_initializer"],
             ),
         ],
-        parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_weights_initializer"],
+        parameter_metadata=DECODER_METADATA["BaseDecoder"]
+        ["fc_weights_initializer"],
     )
 
     fc_bias_initializer: Union[str, Dict] = schema_utils.OneOfOptionsField(
         default="zeros",
         allow_none=True,
-        description="The bias initializer to use for the layers in the fc_stack",
+        description=
+        "The bias initializer to use for the layers in the fc_stack",
         field_options=[
             schema_utils.InitializerOptions(
-                description="Preconfigured bias initializer to use for the layers in the fc_stack.",
-                parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_bias_initializer"],
+                description=
+                "Preconfigured bias initializer to use for the layers in the fc_stack.",
+                parameter_metadata=DECODER_METADATA["BaseDecoder"]
+                ["fc_bias_initializer"],
             ),
             schema_utils.Dict(
-                description="Custom bias initializer to use for the layers in the fc_stack.",
-                parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_bias_initializer"],
+                description=
+                "Custom bias initializer to use for the layers in the fc_stack.",
+                parameter_metadata=DECODER_METADATA["BaseDecoder"]
+                ["fc_bias_initializer"],
             ),
         ],
-        parameter_metadata=DECODER_METADATA["BaseDecoder"]["fc_bias_initializer"],
+        parameter_metadata=DECODER_METADATA["BaseDecoder"]
+        ["fc_bias_initializer"],
     )
 
     fc_norm: str = common_fields.NormField()
@@ -107,7 +119,8 @@ class PassthroughDecoderConfig(BaseDecoderConfig):
 
     type: str = schema_utils.ProtectedString(
         "passthrough",
-        description="The passthrough decoder simply returns the raw numerical values coming from the combiner as "
+        description=
+        "The passthrough decoder simply returns the raw numerical values coming from the combiner as "
         "outputs",
         parameter_metadata=DECODER_METADATA["PassthroughDecoder"]["type"],
     )
@@ -115,12 +128,14 @@ class PassthroughDecoderConfig(BaseDecoderConfig):
     input_size: int = schema_utils.PositiveInteger(
         default=1,
         description="Size of the input to the decoder.",
-        parameter_metadata=DECODER_METADATA["PassthroughDecoder"]["input_size"],
+        parameter_metadata=DECODER_METADATA["PassthroughDecoder"]
+        ["input_size"],
     )
 
 
 @DeveloperAPI
-@register_decoder_config("regressor", [BINARY, NUMBER], model_types=[MODEL_ECD, MODEL_GBM])
+@register_decoder_config("regressor", [BINARY, NUMBER],
+                         model_types=[MODEL_ECD, MODEL_GBM])
 @ludwig_dataclass
 class RegressorConfig(BaseDecoderConfig):
     """RegressorConfig is a dataclass that configures the parameters used for a regressor decoder."""
@@ -150,7 +165,8 @@ class RegressorConfig(BaseDecoderConfig):
 
     weights_initializer: str = schema_utils.InitializerOptions(
         description="Initializer for the weight matrix.",
-        parameter_metadata=DECODER_METADATA["Regressor"]["weights_initializer"],
+        parameter_metadata=DECODER_METADATA["Regressor"]
+        ["weights_initializer"],
     )
 
     bias_initializer: str = schema_utils.InitializerOptions(
@@ -161,7 +177,8 @@ class RegressorConfig(BaseDecoderConfig):
 
 
 @DeveloperAPI
-@register_decoder_config("projector", [VECTOR, TIMESERIES], model_types=[MODEL_ECD])
+@register_decoder_config("projector", [VECTOR, TIMESERIES],
+                         model_types=[MODEL_ECD])
 @ludwig_dataclass
 class ProjectorConfig(BaseDecoderConfig):
     """ProjectorConfig is a dataclass that configures the parameters used for a projector decoder."""
@@ -198,7 +215,8 @@ class ProjectorConfig(BaseDecoderConfig):
 
     weights_initializer: str = schema_utils.InitializerOptions(
         description="Initializer for the weight matrix.",
-        parameter_metadata=DECODER_METADATA["Projector"]["weights_initializer"],
+        parameter_metadata=DECODER_METADATA["Projector"]
+        ["weights_initializer"],
     )
 
     bias_initializer: str = schema_utils.InitializerOptions(
@@ -217,31 +235,35 @@ class ProjectorConfig(BaseDecoderConfig):
         default=1.0,
         min=0,
         min_inclusive=False,
-        description=(
-            "Multiplier to scale the activated outputs by. Useful when setting `activation` to something "
-            "that outputs a value between [-1, 1] like tanh to re-scale values back to order of magnitude of "
-            "the data you're trying to predict. A good rule of thumb in such cases is to pick a value like "
-            "`x * (max - min)` where x is a scalar in the range [1, 2]. For example, if you're trying to predict "
-            "something like temperature, it might make sense to pick a multiplier on the order of `100`."
-        ),
+        description=
+        ("Multiplier to scale the activated outputs by. Useful when setting `activation` to something "
+         "that outputs a value between [-1, 1] like tanh to re-scale values back to order of magnitude of "
+         "the data you're trying to predict. A good rule of thumb in such cases is to pick a value like "
+         "`x * (max - min)` where x is a scalar in the range [1, 2]. For example, if you're trying to predict "
+         "something like temperature, it might make sense to pick a multiplier on the order of `100`."
+         ),
     )
 
-    clip: Union[List[int], Tuple[int]] = schema_utils.FloatRangeTupleDataclassField(
-        n=2,
-        default=None,
-        allow_none=True,
-        min=0,
-        max=999999999,
-        description="Clip the output of the decoder to be within the given range.",
-        parameter_metadata=DECODER_METADATA["Projector"]["clip"],
-    )
+    clip: Union[
+        List[int], Tuple[int]] = schema_utils.FloatRangeTupleDataclassField(
+            n=2,
+            default=None,
+            allow_none=True,
+            min=0,
+            max=999999999,
+            description=
+            "Clip the output of the decoder to be within the given range.",
+            parameter_metadata=DECODER_METADATA["Projector"]["clip"],
+        )
 
 
 @DeveloperAPI
-@register_decoder_config("classifier", [CATEGORY, SET], model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
+@register_decoder_config("classifier", [CATEGORY, SET],
+                         model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
 @ludwig_dataclass
 class ClassifierConfig(BaseDecoderConfig):
     """ """
+
     @classmethod
     def module_name(cls):
         """ """
@@ -274,7 +296,8 @@ class ClassifierConfig(BaseDecoderConfig):
 
     weights_initializer: str = schema_utils.InitializerOptions(
         description="Initializer for the weight matrix.",
-        parameter_metadata=DECODER_METADATA["Classifier"]["weights_initializer"],
+        parameter_metadata=DECODER_METADATA["Classifier"]
+        ["weights_initializer"],
     )
 
     bias_initializer: str = schema_utils.InitializerOptions(
@@ -285,7 +308,8 @@ class ClassifierConfig(BaseDecoderConfig):
 
 
 @DeveloperAPI
-@register_decoder_config("tart", [BINARY, CATEGORY], model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
+@register_decoder_config("tart", [BINARY, CATEGORY],
+                         model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
 @ludwig_dataclass
 class TARTDecoderConfig(BaseDecoderConfig):
     """ """
@@ -299,35 +323,38 @@ class TARTDecoderConfig(BaseDecoderConfig):
         ],
         default=None,
         allow_none=True,
-        description="The model architecture to use in the reasoning head. Defaults to the GPT-2 backbone.",
+        description=
+        "The model architecture to use in the reasoning head. Defaults to the GPT-2 backbone.",
     )
 
-    max_sequence_length: int = common_fields.MaxSequenceLengthField(default=256)
+    max_sequence_length: int = common_fields.MaxSequenceLengthField(
+        default=256)
 
     num_pca_components: int = schema_utils.PositiveInteger(
-        default=16, description="Target size of the PCA projections."
-    )
+        default=16, description="Target size of the PCA projections.")
 
     embedding_size: int = schema_utils.PositiveInteger(
-        default=256, description="Size of the hidden state of the reasoning head."
-    )
+        default=256,
+        description="Size of the hidden state of the reasoning head.")
 
     num_layers: int = schema_utils.PositiveInteger(
-        default=12, description="Number of layers in the reasoning head model. Only used with the GPT-2 backbone."
+        default=12,
+        description=
+        "Number of layers in the reasoning head model. Only used with the GPT-2 backbone."
     )
 
     num_heads: int = schema_utils.PositiveInteger(
         default=8,
-        description="The number of attention heads in the reasoning module. Only used with the GPT-2 backbone.",
+        description=
+        "The number of attention heads in the reasoning module. Only used with the GPT-2 backbone.",
     )
 
     embedding_protocol: str = schema_utils.StringOptions(
         options=["vanilla", "loo"],
         default="loo",
-        description=(
-            'The embedding protocol used to create TART inputs. For "vanilla", the test example is appended to the '
-            'training set and the sequence is passed to the base model. For "loo" embeddings are generated for each '
-            "train example separately by placing all other train examples before it in the prompt and averaging the "
-            "embeddings over the final example's tokens."
-        ),
+        description=
+        ('The embedding protocol used to create TART inputs. For "vanilla", the test example is appended to the '
+         'training set and the sequence is passed to the base model. For "loo" embeddings are generated for each '
+         "train example separately by placing all other train examples before it in the prompt and averaging the "
+         "embeddings over the final example's tokens."),
     )

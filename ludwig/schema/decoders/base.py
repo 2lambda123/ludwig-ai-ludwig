@@ -91,6 +91,7 @@ class PassthroughDecoderConfig(BaseDecoderConfig):
 
     @classmethod
     def module_name(cls):
+        """ """
         return "PassthroughDecoder"
 
     type: str = schema_utils.ProtectedString(
@@ -115,6 +116,7 @@ class RegressorConfig(BaseDecoderConfig):
 
     @classmethod
     def module_name(cls):
+        """ """
         return "Regressor"
 
     type: str = schema_utils.ProtectedString(
@@ -155,6 +157,7 @@ class ProjectorConfig(BaseDecoderConfig):
 
     @classmethod
     def module_name(cls):
+        """ """
         return "Projector"
 
     type: str = schema_utils.ProtectedString(
@@ -227,8 +230,10 @@ class ProjectorConfig(BaseDecoderConfig):
 @register_decoder_config("classifier", [CATEGORY, SET], model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
 @ludwig_dataclass
 class ClassifierConfig(BaseDecoderConfig):
+    """ """
     @classmethod
     def module_name(cls):
+        """ """
         return "Classifier"
 
     type: str = schema_utils.ProtectedString(
@@ -272,6 +277,7 @@ class ClassifierConfig(BaseDecoderConfig):
 @register_decoder_config("tart", [BINARY, CATEGORY], model_types=[MODEL_ECD, MODEL_GBM, MODEL_LLM])
 @ludwig_dataclass
 class TARTDecoderConfig(BaseDecoderConfig):
+    """ """
     reasoning_head: str = schema_utils.StringOptions(
         options=[
             "EleutherAI/gpt-neo-1.3B",

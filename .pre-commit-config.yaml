@@ -58,7 +58,7 @@ repos:
       - id: blacken-docs
         args: [--line-length=120]
   - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.18
+    rev: 0.7.19
     hooks:
       - id: mdformat
         additional_dependencies:
